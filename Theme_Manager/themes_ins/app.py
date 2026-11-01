@@ -25,7 +25,7 @@ skip_input_check = False
 
 x_size, y_size, max_elem = screen_resolutions.get(hw_info, (640, 480, 9))
 
-button_x = x_size - 120
+button_x = x_size - 140
 button_y = y_size - 30
 ratio = y_size / x_size
 
@@ -315,7 +315,7 @@ def load_theme_menu() -> None:
         gr.display_image(img_file, target_x = int(x_size / 2 + 10), target_y = int(y_size / 4), target_width = int(x_size / 2 - 30), target_height = int((x_size / 2 - 30) * ratio), rota=0)
 
     gr.button_circle((20, button_y), "A", f"{translator.translate('Install')}")
-    gr.button_circle((120, button_y), "B", f"{translator.translate('Back')}")
+    gr.button_circle((180, button_y), "B", f"{translator.translate('Back')}")
     gr.button_circle((button_x - 170, button_y), "Y", f"{translator.translate('Switch')} TF: {an.get_sd_storage()}")
     gr.button_rectangle((button_x, button_y), "SEL", f"{translator.translate('Exit')}")
 
@@ -414,8 +414,8 @@ def load_logo_menu() -> None:
         gr.display_image(img_file, target_x = int(x_size / 2 + 10), target_y = int(y_size / 4), target_width = int(x_size / 2 - 30), target_height = int((x_size / 2 - 30) * ratio))
 
     gr.button_circle((20, button_y), "A", f"{translator.translate('Set')}")
-    gr.button_circle((140, button_y), "B", f"{translator.translate('Back')}")
-    gr.button_circle((260, button_y), "X", f"{translator.translate('Ran. disp')}: {translator.translate(cf.get_config('boot.logo'))}")
+    gr.button_circle((180, button_y), "B", f"{translator.translate('Back')}")
+    gr.button_circle((280, button_y), "X", f"{translator.translate('Ran. disp')}: {translator.translate(cf.get_config('boot.logo'))}")
     gr.button_rectangle((button_x, button_y), "SEL", f"{translator.translate('Exit')}")
 
     gr.draw_paint()

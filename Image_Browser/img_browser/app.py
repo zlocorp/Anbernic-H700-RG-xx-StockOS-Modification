@@ -162,15 +162,15 @@ def handle_browser_input() -> None:
         cur_file = file_list[selected_index][2]
         if cur_file == 'image':
             gr.preview_image(file_list[selected_index][1], target_x = int(x_size / 2 + 10), target_y = int(y_size / 4), target_width = int(x_size / 2 - 30), target_height = int((x_size / 2 - 30) * ratio))
-            gr.button_circle((210, button_y), "X", f"{translator.translate('Slideshow')}")
+            gr.button_circle((250, button_y), "X", f"{translator.translate('Slideshow')}")
         gr.button_circle((20, button_y), "A", f"{translator.translate('Open')}")
     else:
         gr.draw_text(
             (x_size / 2, y_size / 2), f"{translator.translate('No valid file found!')}", anchor="mm"
         )
 
-    gr.button_circle((120, button_y), "B", f"{translator.translate('Back')}")
-    gr.button_circle((button_x-170, button_y), "Y", f"{translator.translate('Switch')} TF: {an.get_sd_storage()}")
+    gr.button_circle((150, button_y), "B", f"{translator.translate('Back')}")
+    gr.button_circle((button_x-150, button_y), "Y", f"TF: {an.get_sd_storage()}")
     gr.button_rectangle((button_x-20, button_y), "SEL", f"{translator.translate('Exit')}")
 
     gr.draw_paint()

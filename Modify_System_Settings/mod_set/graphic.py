@@ -198,26 +198,28 @@ class UserInterface:
 
     def row_list_dual(self, left_text: str, right_text: str, pos: tuple[int, int], width: int, selected: bool,
                       show_arrows: bool = False, arrow: str = " ▶") -> None:
-        """绘制左右分栏的列表项，左侧显示功能名，右侧显示当前值"""
-        # 如果选中且 show_arrows，显示左右箭头提示
-        if show_arrows:
-            # 在右侧文字左右边绘制箭头
-            right_text="< "+right_text+" >"
-        else:
-            right_text=right_text + arrow
-        # 背景
+        """Keep the setting name and its current value in separate columns."""
+        right_text = "< " + right_text + " >" if show_arrows else right_text + arrow
         self.draw_rectangle_r(
             [pos[0], pos[1], pos[0] + width, pos[1] + 32],
             5,
             fill=(self.colorBlue if selected else self.colorGrayL1),
         )
-        # 左侧文字
-        self.draw_text((pos[0] + 10, pos[1] + 5), left_text)
-        # 右侧文字（右对齐）
-        font_obj = ImageFont.truetype(font_file, 21)
-        right_width = font_obj.getlength(right_text)
-        right_x = pos[0] + width - right_width - 10
-        self.draw_text((right_x, pos[1] + 5), right_text)
+        for size in range(21, 0, -1):
+            face = ImageFont.truetype(font_file, size)
+            left_box = face.getbbox(left_text)
+            right_box = face.getbbox(right_text)
+            left_width = left_box[2] - left_box[0]
+            right_width = right_box[2] - right_box[0]
+            text_height = max(left_box[3] - left_box[1], right_box[3] - right_box[1])
+            if left_width + right_width + 12 <= width - 20 and text_height <= 24:
+                break
+        self.draw_text((pos[0] + 10 - left_box[0],
+                        pos[1] + (32 - (left_box[3] - left_box[1])) / 2 - left_box[1]),
+                       left_text, size)
+        self.draw_text((pos[0] + width - 10 - right_box[2],
+                        pos[1] + (32 - (right_box[3] - right_box[1])) / 2 - right_box[1]),
+                       right_text, size)
 
     def draw_circle(
         self,
@@ -237,124 +239,68 @@ class UserInterface:
             outline=outline,
         )
 
+    def _wrap_text(self, text, face, max_width):
+        """Wrap by rendered width, retaining paragraphs and long file names."""
+        lines = []
+        for paragraph in text.split("\n"):
+            current = ""
+            for word in paragraph.split():
+                candidate = f"{current} {word}" if current else word
+                if face.getbbox(candidate)[2] - face.getbbox(candidate)[0] <= max_width:
+                    current = candidate
+                    continue
+                if current:
+                    lines.append(current)
+                    current = ""
+                for char in word:
+                    candidate = current + char
+                    box = face.getbbox(candidate)
+                    if current and box[2] - box[0] > max_width:
+                        lines.append(current)
+                        current = char
+                    else:
+                        current = candidate
+            lines.append(current)
+        return lines
+
+    def _fit_text(self, text, max_width, max_height, font):
+        """Keep the complete message, including warnings, inside its panel."""
+        for size in range(font, 0, -1):
+            face = ImageFont.truetype(font_file, size)
+            lines = self._wrap_text(text, face, max_width)
+            line_height = sum(face.getmetrics())
+            if len(lines) * line_height <= max_height:
+                return lines, size, line_height
+        return lines, size, line_height
+
+    def _draw_text_block(self, lines, font, line_height, x, y, width, height):
+        top = y + (height - len(lines) * line_height) / 2
+        for index, line in enumerate(lines):
+            if line:
+                self.draw_text((x + width / 2, top + index * line_height),
+                               line, font, anchor="mt")
+
     def draw_log(self, text, fill="Black", outline="black", width=500, font=21):
+        width = min(width, self.screen_width - 40)
+        lines, font, line_height = self._fit_text(
+            text, width - 20, self.screen_height - 60, font
+        )
+        rect_height = max(80, len(lines) * line_height + 20)
         x = (self.screen_width - width) / 2
-        y = (self.screen_height - 80) / 2
-        rect_height = 80
-        self.draw_rectangle_r([x, y, x + width, y + 80], 5, fill=fill, outline=outline)
-    
-        font_obj = ImageFont.truetype(font_file, font)
-        padding = 10
-        max_width = width - 2 * padding
-    
-        lines = []
-        current_line = ""
-        for word in text.split():
-            test_line = f"{current_line} {word}".strip() if current_line else word
-            bbox = font_obj.getbbox(test_line)
-            test_width = bbox[2] - bbox[0]
-            
-            if test_width <= max_width:
-                current_line = test_line
-            else:
-                if current_line:
-                    lines.append(current_line)
-                    current_line = ""
-                
-                bbox = font_obj.getbbox(word)
-                word_width = bbox[2] - bbox[0]
-                if word_width <= max_width:
-                    current_line = word
-                else:
-                    remaining = word
-                    while remaining:
-                        substring = ""
-                        for char in remaining:
-                            temp_sub = substring + char
-                            bbox = font_obj.getbbox(temp_sub)
-                            temp_width = bbox[2] - bbox[0]
-                            if temp_width <= max_width:
-                                substring = temp_sub
-                            else:
-                                break
-                        if substring:
-                            lines.append(substring)
-                            remaining = remaining[len(substring):]
-                        else:
-                            break
-        if current_line:
-            lines.append(current_line)
-    
-        ascent, descent = font_obj.getmetrics()
-        line_height = int((ascent + descent) * 1.2)
-        total_height = len(lines) * line_height
-        start_y = y + (rect_height - total_height) // 2
-    
-        for i, line in enumerate(lines):
-            text_x = x + width / 2
-            text_y = start_y + i * line_height + ascent - 5
-            self.draw_text((text_x, text_y), line, font, anchor="mm")
-    
-    
+        y = (self.screen_height - rect_height) / 2
+        self.draw_rectangle_r([x, y, x + width, y + rect_height], 5,
+                              fill=fill, outline=outline)
+        self._draw_text_block(lines, font, line_height, x + 10, y + 10,
+                              width - 20, rect_height - 20)
+
     def draw_help(self, text, fill="Black", outline="black", font=21):
-        x = 20
-        y = (self.screen_height - 180)
-        rect_width = self.screen_width - 40
-        rect_height = 130
-        self.draw_rectangle_r([x, y, self.screen_width - 20, y + rect_height], 5, fill=fill, outline=outline)
-    
-        font_obj = ImageFont.truetype(font_file, font)
-        padding = 10
-        max_width = rect_width - 2 * padding
-    
-        lines = []
-        current_line = ""
-        for word in text.split():
-            test_line = f"{current_line} {word}".strip() if current_line else word
-            bbox = font_obj.getbbox(test_line)
-            test_width = bbox[2] - bbox[0]
-            
-            if test_width <= max_width:
-                current_line = test_line
-            else:
-                if current_line:
-                    lines.append(current_line)
-                    current_line = ""
-                
-                bbox = font_obj.getbbox(word)
-                word_width = bbox[2] - bbox[0]
-                if word_width <= max_width:
-                    current_line = word
-                else:
-                    remaining = word
-                    while remaining:
-                        substring = ""
-                        for char in remaining:
-                            temp_sub = substring + char
-                            bbox = font_obj.getbbox(temp_sub)
-                            temp_width = bbox[2] - bbox[0]
-                            if temp_width <= max_width:
-                                substring = temp_sub
-                            else:
-                                break
-                        if substring:
-                            lines.append(substring)
-                            remaining = remaining[len(substring):]
-                        else:
-                            break
-        if current_line:
-            lines.append(current_line)
-    
-        ascent, descent = font_obj.getmetrics()
-        line_height = int((ascent + descent) * 1)
-        total_height = len(lines) * line_height
-        start_y = y + (rect_height - total_height) // 2
-
-        for i, line in enumerate(lines):
-            text_x = self.screen_width // 2
-            text_y = start_y + i * line_height +10
-            self.draw_text((text_x, text_y), line, font, anchor="mm")
-
+        x, y = 20, self.screen_height - 180
+        width, height = self.screen_width - 40, 130
+        self.draw_rectangle_r([x, y, x + width, y + height], 5,
+                              fill=fill, outline=outline)
+        lines, font, line_height = self._fit_text(text, width - 20, height - 20, font)
+        self._draw_text_block(lines, font, line_height, x + 10, y + 10,
+                              width - 20, height - 20)
 
     def get_text_width(self, text, font):
         image = Image.new('RGB', (1, 1))

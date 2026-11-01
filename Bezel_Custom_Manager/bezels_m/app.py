@@ -24,7 +24,7 @@ skip_input_check = True
 
 x_size, y_size, max_elem = screen_resolutions.get(hw_info, (640, 480, 11))
 
-button_x = x_size - 120
+button_x = x_size - 140
 button_y = y_size - 30
 ratio = y_size / x_size
 
@@ -119,7 +119,7 @@ def load_console_menu() -> None:
             (x_size / 2, y_size / 2), f"{translator.translate('No config file found in SD')} {an.get_sd_storage()}", anchor="mm"
         )
 
-    gr.button_circle((button_x - 110, button_y), "Y", f"{translator.translate('Help')}")
+    gr.button_circle((button_x - 140, button_y), "Y", f"{translator.translate('Help')}")
     gr.button_rectangle((button_x, button_y), "SEL", f"{translator.translate('Exit')}")
 
     gr.draw_paint()
@@ -295,8 +295,8 @@ def load_cfg_menu() -> None:
         gr.button_circle((20, button_y), "A", f"{translator.translate('Apply')}")
     elif cfg_is_ok == 2:
         gr.button_circle((20, button_y), "A", f"{translator.translate('Delete')}")
-    gr.button_circle((160, button_y), "B", f"{translator.translate('Back')}")
-    gr.button_circle((280, button_y), "X", f"{translator.translate('Reset')}")
+    gr.button_circle((180, button_y), "B", f"{translator.translate('Back')}")
+    gr.button_circle((300, button_y), "X", f"{translator.translate('Reset')}")
     gr.button_rectangle((button_x, button_y), "SEL", f"{translator.translate('Exit')}")
 
     gr.draw_paint()
