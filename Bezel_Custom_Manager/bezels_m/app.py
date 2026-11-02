@@ -15,6 +15,7 @@ ver="v1.2"
 translator = Translator(system_lang)
 gr = UserInterface()
 cfg_is_ok = 0
+previewed_bezel_file = None
 selected_position = 0
 roms_selected_position = 0
 selected_system = ""
@@ -176,10 +177,16 @@ def load_cfg_menu() -> None:
         roms_selected_position, \
         skip_input_check, \
         selected_system, \
-        cfg_is_ok
+        cfg_is_ok, \
+        previewed_bezel_file
 
     exit_menu = False
     roms_list = bezels.get_roms(an.get_sd_storage_path(), selected_system)
+    previous_position = roms_selected_position
+    roms_selected_position = max(0, min(roms_selected_position, len(roms_list) - 1))
+    if roms_selected_position != previous_position:
+        # Do not apply a cached Apply/Delete action to a different surviving item.
+        cfg_is_ok = 0
     system_path = Path(an.get_sd_storage_path()) / selected_system
     cfg_path = Path(an.get_bezels_cfg_path())
     cfg_file = f"{cfg_path}/{selected_system}.cfg"
@@ -193,7 +200,8 @@ def load_cfg_menu() -> None:
         gr.draw_paint()
         time.sleep(2)
         gr.draw_clear()
-        exit_menu = True
+        skip_input_check = True
+        return
 
     if input.key("B"):
         exit_menu = True
@@ -244,7 +252,7 @@ def load_cfg_menu() -> None:
                 len(roms_list) - 1, roms_selected_position + 100
             )
 
-    elif input.key("A"):
+    elif input.key("A") and previewed_bezel_file == str(system_path / roms_list[roms_selected_position].filename):
         if cfg_is_ok == 1:
             rom = roms_list[roms_selected_position]
             bezel_file = f"{system_path}/{rom.filename}"
@@ -285,20 +293,34 @@ def load_cfg_menu() -> None:
         elif cfg_is_ok == 2:
             rom_to_delete = roms_list[roms_selected_position]
             bezel_file = f"{system_path}/{rom_to_delete.filename}"
-            if os.path.exists(bezel_file):
-                os.remove(bezel_file)
-            roms_list.pop(roms_selected_position)
+            if get_overlay_image(bezel_file, system_path, check_image=True) is not None:
+                # The file or its image may have been repaired since the preview.
+                cfg_is_ok = 1
+            else:
+                try:
+                    os.remove(bezel_file)
+                except FileNotFoundError:
+                    pass
+                except OSError as error:
+                    print(f"[ERROR]Cannot delete bezel config {bezel_file}: {error}")
+                    gr.draw_log(translator.translate('Operation failed. See log for details.'),
+                                fill=gr.colorBlue, outline=gr.colorBlueD1)
+                    gr.draw_paint()
+                    time.sleep(2)
+                    skip_input_check = True
+                    return
+                roms_list.pop(roms_selected_position)
 
-            if not roms_list:
-                current_window = "console"
-                selected_system = ""
-                gr.draw_clear()
-                roms_selected_position = 0
-                skip_input_check = True
-                return
+                if not roms_list:
+                    current_window = "console"
+                    selected_system = ""
+                    gr.draw_clear()
+                    roms_selected_position = 0
+                    skip_input_check = True
+                    return
 
-            if roms_selected_position >= len(roms_list):
-                roms_selected_position = len(roms_list) - 1
+                if roms_selected_position >= len(roms_list):
+                    roms_selected_position = len(roms_list) - 1
 
     if exit_menu:
         current_window = "console"
@@ -332,6 +354,7 @@ def load_cfg_menu() -> None:
     rom = roms_list[roms_selected_position]
     bezel_file = f"{system_path}/{rom.filename}"
     img_file = get_overlay_image(bezel_file, system_path)
+    previewed_bezel_file = bezel_file
     cfg_is_ok = 2
     if img_file is not None:
         try:
