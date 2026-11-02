@@ -29,6 +29,28 @@ button_y = y_size - 30
 ratio = y_size / x_size
 
 
+def get_overlay_image(bezel_file, system_path):
+    """Return an existing overlay image, or None for an unusable config."""
+    try:
+        with open(bezel_file, 'r') as file_object:
+            for line in file_object:
+                key, separator, value = line.partition('=')
+                if not separator or key.strip() != 'overlay0_overlay':
+                    continue
+                value = value.strip()
+                if value.startswith(("'", '"')):
+                    if len(value) < 2 or value[-1] != value[0]:
+                        return None
+                    value = value[1:-1]
+                if not value:
+                    return None
+                image_path = Path(system_path) / value
+                return str(image_path) if image_path.is_file() else None
+    except (OSError, UnicodeError, ValueError):
+        return None
+    return None
+
+
 def start():
     print("[INFO]Starting Custom Bezel Manager...")
     gr.draw_log(
@@ -193,16 +215,8 @@ def load_cfg_menu() -> None:
         if cfg_is_ok == 1:
             rom = roms_list[roms_selected_position]
             bezel_file = f"{system_path}/{rom.filename}"
-            with open(bezel_file, 'r') as file_object:
-                for line in file_object:
-                    line = line.strip()
-                    if line.startswith('overlay0_overlay ='):
-                        overlay_value = line.split(' = ')[1]
-                        if overlay_value.startswith(("'", '"')) and overlay_value.endswith(("'", '"')):
-                            overlay_value = overlay_value[1:-1]
-                        break
-            img_file=f"{system_path}/{overlay_value}"
-            if os.path.exists(img_file):
+            img_file = get_overlay_image(bezel_file, system_path)
+            if img_file is not None:
                 cfg_file = f"{cfg_path}/{selected_system}.cfg"
                 gr.draw_log(f"{translator.translate('Setting...')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
                 gr.draw_paint()
@@ -215,6 +229,13 @@ def load_cfg_menu() -> None:
                 )
                 gr.draw_paint()
                 time.sleep(3)
+            else:
+                cfg_is_ok = 2
+                gr.draw_log(
+                    f"{translator.translate('The .cfg file has an issue and cannot be used!')}", fill=gr.colorBlue, outline=gr.colorBlueD1
+                )
+                gr.draw_paint()
+                time.sleep(2)
             exit_menu = True
         elif cfg_is_ok == 2:
             rom_to_delete = roms_list[roms_selected_position]
@@ -273,16 +294,8 @@ def load_cfg_menu() -> None:
 
     rom = roms_list[roms_selected_position]
     bezel_file = f"{system_path}/{rom.filename}"
-    with open(bezel_file, 'r') as file_object:
-        for line in file_object:
-            line = line.strip()
-            if line.startswith('overlay0_overlay ='):
-                overlay_value = line.split(' = ')[1]
-                if overlay_value.startswith(("'", '"')) and overlay_value.endswith(("'", '"')):
-                    overlay_value = overlay_value[1:-1]
-                break
-    img_file=f"{system_path}/{overlay_value}"
-    if os.path.exists(img_file):
+    img_file = get_overlay_image(bezel_file, system_path)
+    if img_file is not None:
         cfg_is_ok = 1
         gr.display_image(img_file, target_x = int(x_size / 2 + 10), target_y = int(y_size / 4), target_width = int(x_size / 2 - 30), target_height = int((x_size / 2 - 30) * ratio))
     else:
