@@ -94,8 +94,9 @@ def get_config(keys):
 def switch_config(keys, max):
     config = read_config(config_file)
     cur_value = get_value(config, keys)
-    if cur_value is not None:
-        cur_value = int(cur_value) + 1
-        if cur_value == max:
-            cur_value = 0
-        set_config(keys, cur_value)
+    if cur_value is None:
+        raise ValueError(f"Missing setting: {keys}")
+    cur_value = int(cur_value)
+    if max <= 0 or not 0 <= cur_value < max:
+        raise ValueError(f"Invalid value for setting {keys}: {cur_value}")
+    set_config(keys, (cur_value + 1) % max)
