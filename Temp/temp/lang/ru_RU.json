@@ -11,5 +11,8 @@
   "battery_temp":"Температура",
   "battery_status": "Состояние",
   "Charging": "Заряжается",
-  "Discharging": "Разряжается"
+  "Discharging": "Разряжается",
+  "Full": "Полностью заряжен",
+  "Not charging": "Не заряжается",
+  "Unknown": "Неизвестно"
 }

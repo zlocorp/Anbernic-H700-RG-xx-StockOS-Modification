@@ -481,7 +481,7 @@ def load_hotkey() -> None:
                 hotkey_editing = False
                 skip_input_check = True
                 # 显示成功提示
-                gr.draw_log(f"{translator.translate('Mapped')}: {function} -> {new_key}",
+                gr.draw_log(f"{translator.translate('Mapped')}: {translator.translate(function)} -> {new_key}",
                             fill=gr.colorBlue, outline=gr.colorBlueD1)
                 gr.draw_paint()
                 time.sleep(1)

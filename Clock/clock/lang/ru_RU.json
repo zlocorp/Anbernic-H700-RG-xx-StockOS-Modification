@@ -46,5 +46,6 @@
     "Set_Minute": "Минута",
     "Set_Second": "Секунда",
     "Back": "Назад",
-    "Time_Updated": "Время обновлено!"
+    "Time_Updated": "Время обновлено!",
+    "Failed to set time": "Не удалось установить время"
 }

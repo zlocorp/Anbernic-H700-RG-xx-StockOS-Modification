@@ -45,5 +45,6 @@
     "Set_Hour": "Hour",
     "Set_Minute": "Minute",
     "Set_Second": "Second",
-    "Time_Updated": "Time updated!"
+    "Time_Updated": "Time updated!",
+    "Failed to set time": "Failed to set time"
 }

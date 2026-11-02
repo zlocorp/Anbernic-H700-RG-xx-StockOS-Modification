@@ -206,5 +206,6 @@
     "menu.als.1": "Enable",
     "menu.als.opt.0": "Disable this feature.",
     "menu.als.opt.1": "Enable this feature. Usage: Hold 'A' during game start to skip loading save.",
-    "Exiting...": "Exiting..."
+    "Exiting...": "Exiting...",
+    "Invalid power command": "Invalid power command"
 }

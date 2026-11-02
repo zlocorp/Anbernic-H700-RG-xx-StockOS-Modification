@@ -11,5 +11,8 @@
   "battery_temp": "Battery temperature",
   "battery_status": "Battery status",
   "Charging": "Charging",
-  "Discharging": "Discharging"
+  "Discharging": "Discharging",
+  "Full": "Full",
+  "Not charging": "Not charging",
+  "Unknown": "Unknown"
 }

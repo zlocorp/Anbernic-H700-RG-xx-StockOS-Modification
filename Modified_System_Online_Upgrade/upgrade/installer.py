@@ -1683,7 +1683,7 @@ class SoftwareCenterUI:
         self.ui.text((detail_x, content_top + 50), f"v{software.version}" if software.version else "", font=16,
                      color=self.cfg.COLOR_TEXT_SECONDARY)
 
-        author_text = f"by {software.author}" if software.author else self.t.t("Unknown Author")
+        author_text = f"{self.t.t('Author')}: {software.author}" if software.author else self.t.t("Unknown Author")
         self.ui.text((detail_x, content_top + 75), author_text, font=14,
                      color=self.cfg.COLOR_TEXT_TERTIARY)
 

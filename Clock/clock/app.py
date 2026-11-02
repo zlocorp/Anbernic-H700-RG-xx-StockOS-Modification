@@ -516,7 +516,7 @@ def handle_settime_input() -> None:
                 skip_input_check = True
                 return
             except Exception as e:
-                gr.draw_log(f"Error: {e}", fill=gr.colorRed, outline=gr.colorGray)
+                gr.draw_log(f"{translator.translate('Failed to set time')}: {e}", fill=gr.colorRed, outline=gr.colorGray)
                 gr.draw_paint()
                 time.sleep(2)
         elif input.key("B"):

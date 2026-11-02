@@ -19,6 +19,7 @@ class Translator:
 
     def translate(self, key, **kwargs):
         message = self.lang_data.get(key, key)
-        return message.format(**kwargs)
+        # Dynamic fallback text (for example filenames) is not a format template.
+        return message.format(**kwargs) if kwargs else message
 
 translator = Translator() 
