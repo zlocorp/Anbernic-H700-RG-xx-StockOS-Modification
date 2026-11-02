@@ -216,6 +216,7 @@ def load_theme_menu() -> None:
 
     exit_menu = False
     theme_list = themes.get_themes(an.get_sd_storage_path(), selected_system)
+    theme_selected_position = max(0, min(theme_selected_position, len(theme_list) - 1))
     system_path: Path = Path(an.get_sd_storage_path()) / selected_system
 
     if len(theme_list) < 1:
@@ -227,7 +228,8 @@ def load_theme_menu() -> None:
         gr.draw_paint()
         time.sleep(2)
         gr.draw_clear()
-        exit_menu = True
+        skip_input_check = True
+        return
 
     if input.key("B"):
         exit_menu = True
@@ -286,7 +288,7 @@ def load_theme_menu() -> None:
             gr.draw_paint()
             time.sleep(2)
         else:
-            selected_position = 0
+            theme_selected_position = 0
             skip_input_check = True
             return
 
@@ -341,6 +343,7 @@ def load_logo_menu() -> None:
         selected_system
 
     logo_list = themes.get_logos(an.get_sd_storage_path(), selected_system)
+    logo_selected_position = max(0, min(logo_selected_position, len(logo_list) - 1))
     system_path = Path(an.get_sd_storage_path()) / selected_system
 
     if len(logo_list) < 1:
