@@ -75,6 +75,7 @@ def handle_browser_input() -> None:
     global current_window, selected_index, current_path, menu_deep, current_deep, skip_input_check, slideshow_active, slideshow_index, slideshow_images, last_slide_time
 
     update_file_list()
+    selected_index = max(0, min(selected_index, len(file_list) - 1))
 
     if file_list:
         if input.key("DY"):
@@ -119,21 +120,21 @@ def handle_browser_input() -> None:
             else:
                 enter_fullscreen(file_list[selected_index][1])
                 return
-        elif input.key("B"):
-            go_back_directory()
-            if current_deep > 0:
-                current_deep-=1
-            selected_index = menu_deep[current_deep]
-        elif input.key("Y"):
-            an.switch_sd_storage()
-            new_current_path = an.get_sd_storage_path()
-            if not current_path == new_current_path:
-                current_path = an.get_sd_storage_path()
-                selected_index = 0
-                current_deep = 0
-                menu_deep = [0] * 20
-                skip_input_check = True
-                return
+    if input.key("B"):
+        go_back_directory()
+        if current_deep > 0:
+            current_deep-=1
+        selected_index = menu_deep[current_deep]
+    elif input.key("Y"):
+        an.switch_sd_storage()
+        new_current_path = an.get_sd_storage_path()
+        if not current_path == new_current_path:
+            current_path = an.get_sd_storage_path()
+            selected_index = 0
+            current_deep = 0
+            menu_deep = [0] * 20
+            skip_input_check = True
+            return
 
     menu_deep[current_deep] = selected_index
     gr.draw_clear()

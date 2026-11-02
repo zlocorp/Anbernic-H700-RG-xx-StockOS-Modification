@@ -87,6 +87,7 @@ def load_console_menu() -> None:
     global selected_position, selected_system, current_window, skip_input_check
 
     available_systems = scraper.get_available_systems(an.get_sd_storage_path())
+    selected_position = max(0, min(selected_position, len(available_systems) - 1))
 
     if available_systems:
         if input.key("DY"):
@@ -127,7 +128,7 @@ def load_console_menu() -> None:
     gr.draw_rectangle_r([10, 40, x_size - 10, y_size - 40], 15, fill=gr.colorGrayD2, outline=None)
     gr.draw_text((x_size / 2, 20), f"{translator.translate('Tiny Scraper')} {ver}", font=23, anchor="mm")
 
-    if len(available_systems) > 1:
+    if available_systems:
         start_idx = int(selected_position / max_elem) * max_elem
         end_idx = start_idx + max_elem
         for i, system in enumerate(available_systems[start_idx:end_idx]):
@@ -168,10 +169,11 @@ def load_roms_menu() -> None:
     imgs_files = set()
     for folder in rom_folders:
         imgs_folder = folder / "Imgs"
-        imgs_files.update(scraper.get_image_files_without_extension(imgs_folder))
+        imgs_files.update((folder, name) for name in scraper.get_image_files_without_extension(imgs_folder))
 
-    roms_without_image = list(set([rom for rom in roms_list if rom.name not in imgs_files]))
+    roms_without_image = list(set([rom for rom in roms_list if ((system_path / rom.filename).parent, rom.name) not in imgs_files]))
     roms_without_image.sort(key=lambda x: x.name)
+    roms_selected_position = max(0, min(roms_selected_position, len(roms_without_image) - 1))
     system_id = get_system_id(selected_system)
 
     if len(roms_without_image) < 1:
@@ -183,7 +185,9 @@ def load_roms_menu() -> None:
         gr.draw_paint()
         time.sleep(2)
         gr.draw_clear()
-        exit_menu = True
+        roms_selected_position = 0
+        skip_input_check = True
+        return
 
     if input.key("B"):
         exit_menu = True
@@ -234,7 +238,7 @@ def load_roms_menu() -> None:
         )
         gr.draw_paint()
         for rom in roms_without_image:
-            if rom.name not in imgs_files:
+            if ((system_path / rom.filename).parent, rom.name) not in imgs_files:
                 rom_path = system_path / rom.filename
                 imgs_folder = rom_path.parent / "Imgs"
                 if not imgs_folder.exists():
