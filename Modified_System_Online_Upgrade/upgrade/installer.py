@@ -19,6 +19,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 import zipfile
 from dataclasses import dataclass, asdict, fields, field
@@ -988,15 +989,32 @@ class SoftwareManager:
             LOGGER.error(f"Error loading installed software database: {e}")
             self.installed_software = {}
 
-    def save_installed_software(self) -> None:
-        """Save installed software to database"""
+    def save_installed_software(self) -> bool:
+        """Atomically replace the database without truncating the previous record."""
+        temporary_path = None
         try:
-            os.makedirs(os.path.dirname(self.cfg.database_path), exist_ok=True)
-            with open(self.cfg.database_path, 'w', encoding='utf-8') as f:
+            database_dir = os.path.dirname(self.cfg.database_path) or "."
+            os.makedirs(database_dir, exist_ok=True)
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                             dir=database_dir, prefix=".installed-",
+                                             delete=False) as f:
+                temporary_path = f.name
                 json.dump({k: asdict(v) for k, v in self.installed_software.items()}, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary_path, self.cfg.database_path)
+            temporary_path = None
             LOGGER.info("Saved installed software database")
+            return True
         except Exception as e:
             LOGGER.error(f"Error saving installed software database: {e}")
+            return False
+        finally:
+            if temporary_path is not None:
+                try:
+                    os.remove(temporary_path)
+                except OSError as e:
+                    LOGGER.warning(f"Could not remove temporary database: {e}")
 
     def fetch_software_list(self) -> bool:
         """Fetch software list from repositories"""
@@ -1081,36 +1099,51 @@ class SoftwareManager:
         return [s for s in self.software_list
                 if query in s.name.lower() or query in s.description.lower()]
 
-    def install_software(self, software: SoftwarePackage) -> bool:
-        """Install software package"""
+    def prepare_software(self, software: SoftwarePackage) -> Optional[Tuple[str, str]]:
+        """Stage and validate the package before changing an installed version."""
+        self.last_error = ""
+        stage_root = None
+        try:
+            os.makedirs(self.cfg.cache_path, exist_ok=True)
+            # Never reuse the old install_path: uninstall may remove that directory.
+            stage_root = tempfile.mkdtemp(prefix="software-", dir=self.cfg.cache_path)
+            download_path = os.path.join(stage_root, "package.zip")
+            install_dir = os.path.join(stage_root, "payload")
+            if not self._download_software(software, download_path):
+                raise ValueError("Package download or verification failed")
+            os.makedirs(install_dir, exist_ok=True)
+            if not self._extract_software(download_path, install_dir, software):
+                raise ValueError("Package extraction failed")
+            if not os.path.isfile(os.path.join(install_dir, "install.sh")):
+                raise ValueError("Package is missing install.sh")
+            return stage_root, install_dir
+        except Exception as e:
+            LOGGER.error(f"Error preparing {software.name}: {e}")
+            if stage_root is not None:
+                shutil.rmtree(stage_root, ignore_errors=True)
+            return None
+
+    def install_software(self, software: SoftwarePackage,
+                         prepared: Optional[Tuple[str, str]] = None) -> bool:
+        """Install a validated package, optionally reusing update preflight staging."""
+        self.last_error = ""
+        stage_root = None
         try:
             LOGGER.info(f"Starting installation of {software.name}")
-
-            # Create necessary directories
-            os.makedirs(self.cfg.cache_path, exist_ok=True)
-
-            # Download the software
-            download_path = os.path.join(self.cfg.cache_path, f"{software.id}.zip")
-            download_result = self._download_software(software, download_path)
-
-            if not download_result:
-                shutil.rmtree(self.cfg.cache_path, ignore_errors=True)
+            if prepared is None:
+                prepared = self.prepare_software(software)
+            if prepared is None:
                 return False
-
-            # Create installation directory
-            install_dir = os.path.join(self.cfg.cache_path, software.category, software.id)
-            os.makedirs(install_dir, exist_ok=True)
-
-            # Extract and install
-            if not self._extract_software(download_path, install_dir, software):
-                shutil.rmtree(self.cfg.cache_path, ignore_errors=True)
-                return False
+            stage_root, install_dir = prepared
 
             install_script = os.path.join(install_dir, "install.sh")
             uninstall_script = os.path.join(install_dir, "uninstall.sh")
             has_install = os.path.isfile(install_script)
             has_uninstall = os.path.isfile(uninstall_script)
             LOGGER.debug(software)
+            if not has_install:
+                LOGGER.error(f"Package for {software.name} is missing install.sh")
+                return False
 
             if has_install:
                 LOGGER.info(f"Executing install.sh for {software.name}")
@@ -1129,12 +1162,10 @@ class SoftwareManager:
                         LOGGER.error(f"install.sh failed with return code {result.returncode}")
                         LOGGER.error(f"stdout: {result.stdout}")
                         LOGGER.error(f"stderr: {result.stderr}")
-                        shutil.rmtree(self.cfg.cache_path, ignore_errors=True)
                         return False
                     LOGGER.info(f"install.sh executed successfully")
                 except Exception as e:
                     LOGGER.error(f"Error executing install.sh: {e}")
-                    shutil.rmtree(self.cfg.cache_path, ignore_errors=True)
                     return False
 
             if has_uninstall:
@@ -1152,7 +1183,9 @@ class SoftwareManager:
             software.install_path = install_dir
             software.update_available = False
             self.installed_software[software.id] = software
-            self.save_installed_software()
+            if not self.save_installed_software():
+                self.last_error = "Files installed, but the database could not be saved."
+                return False
 
             LOGGER.info(f"Successfully installed {software.name}")
             return True
@@ -1162,10 +1195,12 @@ class SoftwareManager:
             return False
 
         finally:
-            shutil.rmtree(self.cfg.cache_path, ignore_errors=True)
+            if stage_root is not None:
+                shutil.rmtree(stage_root, ignore_errors=True)
 
     def uninstall_software(self, software: SoftwarePackage) -> bool:
         """Uninstall software package, return True on success, False on failure."""
+        self.last_error = ""
         try:
             if software.id not in self.installed_software:
                 LOGGER.warning(f"Software {software.id} not in installed database")
@@ -1210,7 +1245,8 @@ class SoftwareManager:
 
             # Remove from database
             del self.installed_software[software.id]
-            self.save_installed_software()
+            software.installed = False
+            software.update_available = False
 
             # Update software list state
             for s in self.software_list:
@@ -1218,6 +1254,10 @@ class SoftwareManager:
                     s.installed = False
                     s.update_available = False
                     break
+
+            if not self.save_installed_software():
+                self.last_error = "Files removed, but the database could not be saved."
+                return False
 
             LOGGER.info(f"Successfully uninstalled {software.name}")
             return True
@@ -2383,48 +2423,63 @@ class SoftwareCenterApp:
             self.input.reset()
 
     def perform_software_update(self, software: SoftwarePackage) -> None:
-        """Perform software update: uninstall old version (if has uninstall script) then install new."""
-        if software.installed:
-            uninstall_dir = os.path.join(self.cfg.uninstall_path, software.category, software.id)
-            uninstall_script = os.path.join(uninstall_dir, "uninstall.sh")
-            if os.path.exists(uninstall_script):
-                self.ui_helper.draw_message(
-                    self.t.t("Uninstalling"),
-                    f"{self.t.t('Uninstalling old version of')} {software.name}...",
-                    "info"
-                )
-                self.ui.paint()
-                if not self.manager.uninstall_software(software):
-                    self.ui_helper.draw_message(
-                        self.t.t("Uninstall Failed"),
-                        f"{self.t.t('Failed to uninstall old version of')} {software.name}",
-                        "error"
-                    )
-                    self.wait_for_input()
-                    self.ui_helper.draw_software_detail(software)
-                    return
-
-        self.ui_helper.draw_message(
-            self.t.t("Updating"),
-            f"{self.t.t('Updating')} {software.name}...",
-            "info"
-        )
-        self.ui.paint()
-
-        if self.manager.install_software(software):
-            self.ui_helper.draw_message(
-                self.t.t("Update Complete"),
-                f"{software.name} {self.t.t('has been updated to version')} {software.version}",
-                "success"
-            )
-        else:
+        """Validate the new package before uninstalling the old version."""
+        prepared = self.manager.prepare_software(software)
+        if prepared is None:
             self.ui_helper.draw_message(
                 self.t.t("Update Failed"),
                 f"{self.t.t('Failed to update')} {software.name}",
                 "error"
             )
-        self.wait_for_input()
-        self.ui_helper.draw_software_detail(software)
+            self.wait_for_input()
+            self.ui_helper.draw_software_detail(software)
+            return
+
+        try:
+            if software.installed:
+                uninstall_dir = os.path.join(self.cfg.uninstall_path, software.category, software.id)
+                uninstall_script = os.path.join(uninstall_dir, "uninstall.sh")
+                if os.path.exists(uninstall_script):
+                    self.ui_helper.draw_message(
+                        self.t.t("Uninstalling"),
+                        f"{self.t.t('Uninstalling old version of')} {software.name}...",
+                        "info"
+                    )
+                    self.ui.paint()
+                    if not self.manager.uninstall_software(software):
+                        self.ui_helper.draw_message(
+                            self.t.t("Uninstall Failed"),
+                            self.t.t(self.manager.last_error) if getattr(self.manager, "last_error", "") else f"{self.t.t('Failed to uninstall old version of')} {software.name}",
+                            "error"
+                        )
+                        self.wait_for_input()
+                        self.ui_helper.draw_software_detail(software)
+                        return
+
+            self.ui_helper.draw_message(
+                self.t.t("Updating"),
+                f"{self.t.t('Updating')} {software.name}...",
+                "info"
+            )
+            self.ui.paint()
+
+            if self.manager.install_software(software, prepared=prepared):
+                self.ui_helper.draw_message(
+                    self.t.t("Update Complete"),
+                    f"{software.name} {self.t.t('has been updated to version')} {software.version}",
+                    "success"
+                )
+            else:
+                self.ui_helper.draw_message(
+                    self.t.t("Update Failed"),
+                    self.t.t(self.manager.last_error) if getattr(self.manager, "last_error", "") else f"{self.t.t('Failed to update')} {software.name}",
+                    "error"
+                )
+            self.wait_for_input()
+            self.ui_helper.draw_software_detail(software)
+
+        finally:
+            shutil.rmtree(prepared[0], ignore_errors=True)
 
     def install_software_from_detail(self, software: SoftwarePackage) -> None:
         """Install software from detail view"""
@@ -2444,7 +2499,7 @@ class SoftwareCenterApp:
         else:
             self.ui_helper.draw_message(
                 self.t.t("Installation Failed"),
-                f"{self.t.t('Failed to install')} {software.name}",
+                self.t.t(self.manager.last_error) if getattr(self.manager, "last_error", "") else f"{self.t.t('Failed to install')} {software.name}",
                 "error"
             )
         self.wait_for_input()
@@ -2468,7 +2523,7 @@ class SoftwareCenterApp:
         else:
             self.ui_helper.draw_message(
                 self.t.t("Uninstallation Failed"),
-                f"{self.t.t('Failed to uninstall')} {software.name}",
+                self.t.t(self.manager.last_error) if getattr(self.manager, "last_error", "") else f"{self.t.t('Failed to uninstall')} {software.name}",
                 "error"
             )
         self.wait_for_input()

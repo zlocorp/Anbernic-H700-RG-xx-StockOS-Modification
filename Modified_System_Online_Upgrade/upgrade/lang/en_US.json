@@ -49,6 +49,8 @@
     "Initializing...": "Initializing...",
     "Install": "Install",
     "Installation Complete": "Installation Complete",
+    "Files installed, but the database could not be saved.": "Files installed, but the database could not be saved.",
+    "Files removed, but the database could not be saved.": "Files removed, but the database could not be saved.",
     "Installation Failed": "Installation Failed",
     "Installed Software": "Installed Software",
     "Installing": "Installing",

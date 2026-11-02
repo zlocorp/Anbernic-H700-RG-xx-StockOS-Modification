@@ -49,6 +49,8 @@
     "Initializing...": "Инициализация...",
     "Install": "Установить",
     "Installation Complete": "Установка завершена",
+    "Files installed, but the database could not be saved.": "Файлы установлены, но сохранить базу данных не удалось.",
+    "Files removed, but the database could not be saved.": "Файлы удалены, но сохранить базу данных не удалось.",
     "Installation Failed": "Ошибка установки",
     "Installed Software": "Установленное ПО",
     "Installing": "Установка",
