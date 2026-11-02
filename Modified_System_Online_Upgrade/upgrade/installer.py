@@ -1123,10 +1123,83 @@ class SoftwareManager:
                 shutil.rmtree(stage_root, ignore_errors=True)
             return None
 
+    def _cleanup_prepared(self, prepared: Optional[Tuple[str, str]]) -> None:
+        if prepared is None:
+            return
+        retained = any(item.get("prepared") == prepared
+                       for item in getattr(self, "pending_operations", {}).values())
+        if not retained:
+            shutil.rmtree(prepared[0], ignore_errors=True)
+
+    def retry_pending_operation(self, software: SoftwarePackage) -> bool:
+        """Retry installation information only; never repeat a successful script."""
+        self.last_error = ""
+        pending = getattr(self, "pending_operations", {}).get(software.id)
+        if pending is None:
+            return False
+        completed = pending["software"]
+        installed = pending["action"] == "install"
+        # A repository refresh may have replaced the selected package object.
+        software.installed = installed
+        software.local_version = completed.local_version
+        software.update_available = False
+        try:
+            uninstall_dir = os.path.join(self.cfg.uninstall_path, completed.category, completed.id)
+            uninstall_script = os.path.join(uninstall_dir, "uninstall.sh")
+            if installed:
+                source = os.path.join(pending["prepared"][1], "uninstall.sh")
+                if os.path.isfile(source):
+                    os.makedirs(uninstall_dir, exist_ok=True)
+                    temporary_path = None
+                    try:
+                        with open(source, "rb") as source_file:
+                            with tempfile.NamedTemporaryFile(mode="wb", dir=uninstall_dir,
+                                                             prefix=".uninstall-", delete=False) as target:
+                                temporary_path = target.name
+                                shutil.copyfileobj(source_file, target)
+                                target.flush()
+                                os.fsync(target.fileno())
+                        os.replace(temporary_path, uninstall_script)
+                        temporary_path = None
+                    finally:
+                        if temporary_path is not None:
+                            try:
+                                os.remove(temporary_path)
+                            except OSError as e:
+                                LOGGER.warning(f"Could not remove temporary uninstall script: {e}")
+            else:
+                if os.path.isfile(uninstall_script):
+                    os.remove(uninstall_script)
+                if completed.install_path and os.path.exists(completed.install_path):
+                    shutil.rmtree(completed.install_path)
+            if not self.save_installed_software():
+                raise OSError("Could not save installed software database")
+        except Exception as e:
+            LOGGER.error(f"Could not finalize installation information for {completed.name}: {e}")
+            self.last_error = (
+                "Files installed, but installation information could not be saved. Press A to retry."
+                if installed else
+                "Files removed, but installation information could not be saved. Press A to retry."
+            )
+            return False
+        del self.pending_operations[software.id]
+        self._cleanup_prepared(pending.get("prepared"))
+        if installed and completed.instruction:
+            try:
+                self.show_instruction(completed)
+            except Exception as e:
+                LOGGER.warning(f"Could not display installation instructions: {e}")
+        return True
+
     def install_software(self, software: SoftwarePackage,
                          prepared: Optional[Tuple[str, str]] = None) -> bool:
         """Install a validated package, optionally reusing update preflight staging."""
         self.last_error = ""
+        if software.id in getattr(self, "pending_operations", {}):
+            if self.pending_operations[software.id]["action"] != "install":
+                self.last_error = "Installation information is pending. Press A to retry."
+                return False
+            return self.retry_pending_operation(software)
         stage_root = None
         try:
             LOGGER.info(f"Starting installation of {software.name}")
@@ -1137,9 +1210,7 @@ class SoftwareManager:
             stage_root, install_dir = prepared
 
             install_script = os.path.join(install_dir, "install.sh")
-            uninstall_script = os.path.join(install_dir, "uninstall.sh")
             has_install = os.path.isfile(install_script)
-            has_uninstall = os.path.isfile(uninstall_script)
             LOGGER.debug(software)
             if not has_install:
                 LOGGER.error(f"Package for {software.name} is missing install.sh")
@@ -1168,23 +1239,18 @@ class SoftwareManager:
                     LOGGER.error(f"Error executing install.sh: {e}")
                     return False
 
-            if has_uninstall:
-                LOGGER.info(f"Copying uninstall.sh from {software.name}")
-                uninstall_dir = os.path.join(self.cfg.uninstall_path, software.category, software.id)
-                os.makedirs(uninstall_dir, exist_ok=True)
-                shutil.copyfile(uninstall_script, os.path.join(uninstall_dir, "uninstall.sh"))
-
-            if software.instruction:
-                self.show_instruction(software)
-
             # Update database
             software.installed = True
             software.local_version = software.version
             software.install_path = install_dir
             software.update_available = False
             self.installed_software[software.id] = software
-            if not self.save_installed_software():
-                self.last_error = "Files installed, but the database could not be saved."
+            if not hasattr(self, "pending_operations"):
+                self.pending_operations = {}
+            self.pending_operations[software.id] = {
+                "action": "install", "software": software, "prepared": prepared
+            }
+            if not self.retry_pending_operation(software):
                 return False
 
             LOGGER.info(f"Successfully installed {software.name}")
@@ -1196,22 +1262,26 @@ class SoftwareManager:
 
         finally:
             if stage_root is not None:
-                shutil.rmtree(stage_root, ignore_errors=True)
+                self._cleanup_prepared(prepared)
 
     def uninstall_software(self, software: SoftwarePackage) -> bool:
         """Uninstall software package, return True on success, False on failure."""
         self.last_error = ""
+        if software.id in getattr(self, "pending_operations", {}):
+            if self.pending_operations[software.id]["action"] != "uninstall":
+                self.last_error = "Installation information is pending. Press A to retry."
+                return False
+            return self.retry_pending_operation(software)
         try:
             if software.id not in self.installed_software:
                 LOGGER.warning(f"Software {software.id} not in installed database")
                 return False
 
-            # Remove installation directory (temporary extracted files)
-            if software.install_path and os.path.exists(software.install_path):
-                shutil.rmtree(software.install_path)
-
             uninstall_dir = os.path.join(self.cfg.uninstall_path, software.category, software.id)
             uninstall_script = os.path.join(uninstall_dir, "uninstall.sh")
+            if not os.path.isfile(uninstall_script):
+                self.last_error = "Uninstall script is missing. Installed files and record were kept."
+                return False
             script_success = True
 
             if os.path.exists(uninstall_script):
@@ -1238,10 +1308,6 @@ class SoftwareManager:
                 if not script_success:
                     LOGGER.warning("Uninstall script failed, keeping database entry")
                     return False
-                else:
-                    os.remove(uninstall_script)
-            else:
-                LOGGER.info(f"No uninstall script found for {software.name}, skipping")
 
             # Remove from database
             del self.installed_software[software.id]
@@ -1255,8 +1321,12 @@ class SoftwareManager:
                     s.update_available = False
                     break
 
-            if not self.save_installed_software():
-                self.last_error = "Files removed, but the database could not be saved."
+            if not hasattr(self, "pending_operations"):
+                self.pending_operations = {}
+            self.pending_operations[software.id] = {
+                "action": "uninstall", "software": software
+            }
+            if not self.retry_pending_operation(software):
                 return False
 
             LOGGER.info(f"Successfully uninstalled {software.name}")
@@ -1842,7 +1912,10 @@ class SoftwareCenterUI:
         app_x = button_x + 180
         back_x = self.ui.x_size - button_width + 20
 
-        if software.installed:
+        if software.id in getattr(self.manager, "pending_operations", {}):
+            self.ui.button([button_x, button_y, button_x + button_width, button_y + 40],
+                           self.t.t("Retry saving"), "A", True, type=2)
+        elif software.installed:
             uninstall_dir = os.path.join(self.cfg.uninstall_path, software.category, software.id)
             uninstall_script = os.path.join(uninstall_dir, "uninstall.sh")
             if software.update_available:
@@ -1978,7 +2051,8 @@ class SoftwareCenterUI:
 
         # Message panel
         panel_width = min(self.ui.x_size - 100, 500)
-        panel_height = 200
+        message_lines = self.wrap_text(message, 18, panel_width - 40)
+        panel_height = max(200, 140 + len(message_lines) * 24 + (60 if button else 20))
         panel_x = (self.ui.x_size - panel_width) // 2
         panel_y = (self.ui.y_size - panel_height) // 2
 
@@ -1989,8 +2063,9 @@ class SoftwareCenterUI:
         self.ui.text((self.ui.x_size // 2, panel_y + 40), icon, font=48, anchor="mm")
         self.ui.text((self.ui.x_size // 2, panel_y + 90), title, font=24,
                      anchor="mm", bold=True)
-        self.ui.text((self.ui.x_size // 2, panel_y + 120), message, font=18,
-                     anchor="mm", color=self.cfg.COLOR_TEXT_SECONDARY)
+        for i, line in enumerate(message_lines):
+            self.ui.text((self.ui.x_size // 2, panel_y + 120 + i * 24), line, font=18,
+                         anchor="mm", color=self.cfg.COLOR_TEXT_SECONDARY)
 
         # OK button
         if button:
@@ -2401,6 +2476,12 @@ class SoftwareCenterApp:
                 self.manager.selected_software = None
                 return
 
+            elif (self.input.is_key("A") or self.input.is_key("Y")) and software.id in getattr(self.manager, "pending_operations", {}):
+                if self.manager.pending_operations[software.id]["action"] == "install":
+                    self.install_software_from_detail(software)
+                else:
+                    self.uninstall_software_from_detail(software)
+
             elif self.input.is_key("A"):
                 if software.installed and not software.update_available:
                     uninstall_dir = os.path.join(self.cfg.uninstall_path, software.category, software.id)
@@ -2414,6 +2495,9 @@ class SoftwareCenterApp:
                     self.install_software_from_detail(software)
 
             elif self.input.is_key("Y") and software.installed and not software.update_available:
+                uninstall_script = os.path.join(self.cfg.uninstall_path, software.category, software.id, "uninstall.sh")
+                if not os.path.isfile(uninstall_script):
+                    return
                 LOGGER.info(f"Y button pressed for uninstalling {software.name}")
                 self.uninstall_software_from_detail(software)
 
@@ -2424,6 +2508,12 @@ class SoftwareCenterApp:
 
     def perform_software_update(self, software: SoftwarePackage) -> None:
         """Validate the new package before uninstalling the old version."""
+        if software.id in getattr(self.manager, "pending_operations", {}):
+            if self.manager.pending_operations[software.id]["action"] == "install":
+                self.install_software_from_detail(software)
+            else:
+                self.uninstall_software_from_detail(software)
+            return
         prepared = self.manager.prepare_software(software)
         if prepared is None:
             self.ui_helper.draw_message(
@@ -2479,7 +2569,7 @@ class SoftwareCenterApp:
             self.ui_helper.draw_software_detail(software)
 
         finally:
-            shutil.rmtree(prepared[0], ignore_errors=True)
+            self.manager._cleanup_prepared(prepared)
 
     def install_software_from_detail(self, software: SoftwarePackage) -> None:
         """Install software from detail view"""
