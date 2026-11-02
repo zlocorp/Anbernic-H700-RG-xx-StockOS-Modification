@@ -184,9 +184,6 @@ def load_cfg_menu() -> None:
     cfg_path = Path(an.get_bezels_cfg_path())
     cfg_file = f"{cfg_path}/{selected_system}.cfg"
 
-    if not cfg_path.exists():
-        cfg_path.mkdir()
-
     if len(roms_list) < 1:
         current_window = "console"
         selected_system = ""
@@ -204,13 +201,27 @@ def load_cfg_menu() -> None:
         cfg_file = f"{cfg_path}/{selected_system}.cfg"
         gr.draw_log(f"{translator.translate('Resetting...')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
         gr.draw_paint()
-        cf.set_config("global.bezel", 1)
-        if os.path.exists(cfg_file):
-            os.remove(cfg_file)
-        time.sleep(1)
-        gr.draw_log(
-            f"{translator.translate('Reset bezel for')} {selected_system} {translator.translate('to')} {translator.translate('default')}", fill=gr.colorBlue, outline=gr.colorBlueD1
-        )
+        try:
+            cf.set_config("global.bezel", 1)
+        except (OSError, UnicodeError) as error:
+            print(f"[ERROR]Cannot enable bezels for reset: {error}")
+            gr.draw_log(translator.translate('Operation failed. See log for details.'),
+                        fill=gr.colorBlue, outline=gr.colorBlueD1)
+        else:
+            try:
+                try:
+                    os.unlink(cfg_file)
+                except FileNotFoundError:
+                    pass
+            except OSError as error:
+                print(f"[ERROR]Bezels enabled, but selection reset failed: {error}")
+                gr.draw_log(translator.translate('Bezels were enabled, but the selected bezel could not be reset.'),
+                            fill=gr.colorBlue, outline=gr.colorBlueD1)
+            else:
+                gr.draw_log(
+                    f"{translator.translate('Reset bezel for')} {selected_system} {translator.translate('to')} {translator.translate('default')}",
+                    fill=gr.colorBlue, outline=gr.colorBlueD1
+                )
         gr.draw_paint()
         time.sleep(3)
         exit_menu = True
@@ -242,13 +253,25 @@ def load_cfg_menu() -> None:
                 cfg_file = f"{cfg_path}/{selected_system}.cfg"
                 gr.draw_log(f"{translator.translate('Setting...')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
                 gr.draw_paint()
-                with open(cfg_file, 'w') as file_object:
-                    file_object.write(f"{bezel_file}\n")
-                cf.set_config("global.bezel", 1)
-                time.sleep(1)
-                gr.draw_log(
-                    f"{selected_system} {translator.translate('bezel set to')} {rom.name}", fill=gr.colorBlue, outline=gr.colorBlueD1
-                )
+                try:
+                    cfg_path.mkdir(parents=True, exist_ok=True)
+                    cf.write_text(cfg_file, f"{bezel_file}\n")
+                except (OSError, UnicodeError) as error:
+                    print(f"[ERROR]Cannot save bezel selection: {error}")
+                    gr.draw_log(translator.translate('Operation failed. See log for details.'),
+                                fill=gr.colorBlue, outline=gr.colorBlueD1)
+                else:
+                    try:
+                        cf.set_config("global.bezel", 1)
+                    except (OSError, UnicodeError) as error:
+                        print(f"[ERROR]Selection saved, but enabling bezels failed: {error}")
+                        gr.draw_log(translator.translate('Bezel selection was saved, but enabling bezels failed.'),
+                                    fill=gr.colorBlue, outline=gr.colorBlueD1)
+                    else:
+                        gr.draw_log(
+                            f"{selected_system} {translator.translate('bezel set to')} {rom.name}",
+                            fill=gr.colorBlue, outline=gr.colorBlueD1
+                        )
                 gr.draw_paint()
                 time.sleep(3)
             else:

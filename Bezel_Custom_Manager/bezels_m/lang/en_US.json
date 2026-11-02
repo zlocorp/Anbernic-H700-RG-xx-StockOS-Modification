@@ -1,4 +1,7 @@
 {
+  "Operation failed. See log for details.": "Operation failed. See log for details.",
+  "Bezels were enabled, but the selected bezel could not be reset.": "Bezels were enabled, but the selected bezel could not be reset.",
+  "Bezel selection was saved, but enabling bezels failed.": "Bezel selection was saved, but enabling bezels failed.",
   "Unknown": "Unknown",
   "Welcome": "Welcome !",
   "Delete": "Delete",

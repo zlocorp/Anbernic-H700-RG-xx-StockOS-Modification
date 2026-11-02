@@ -1,4 +1,7 @@
 {
+  "Operation failed. See log for details.": "Ошибка операции. Подробности в журнале.",
+  "Bezels were enabled, but the selected bezel could not be reset.": "Рамки включены, но сбросить выбранную рамку не удалось.",
+  "Bezel selection was saved, but enabling bezels failed.": "Выбор рамки сохранен, но включить рамки не удалось.",
   "Unknown": "Неизвестно",
   "Welcome": "Добро пожаловать!",
   "Select": "Выбрать",
