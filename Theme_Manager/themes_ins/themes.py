@@ -2,6 +2,7 @@ import subprocess
 import shutil
 import os
 import uuid
+import tempfile
 import config as cf
 from pathlib import Path
 from systems import get_system_extension, systems
@@ -86,14 +87,26 @@ class Themes:
             ['mount', '-t', 'vfat', '-o', 'rw,utf8,noatime', boot_device, boot_path],
             check=True,
         )
+        temporary_logo = None
         try:
-            shutil.copyfile(logo_file, os.path.join(boot_path, 'bootlogo.bmp'))
+            with tempfile.NamedTemporaryFile(dir=boot_path, prefix='.bootlogo-', delete=False) as output:
+                temporary_logo = output.name
+                with open(logo_file, 'rb') as source:
+                    shutil.copyfileobj(source, output)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary_logo, os.path.join(boot_path, 'bootlogo.bmp'))
+            temporary_logo = None
         finally:
-            # Only unmount after our mount succeeded. Leave the directory in
-            # place if unmount fails; it may still contain a mounted filesystem.
-            subprocess.run(['umount', boot_path], check=True)
-            if created_directory:
-                os.rmdir(boot_path)
+            try:
+                if temporary_logo is not None:
+                    os.unlink(temporary_logo)
+            finally:
+                # Only unmount after our mount succeeded. Leave the directory in
+                # place if unmount fails; it may still contain a mounted filesystem.
+                subprocess.run(['umount', boot_path], check=True)
+                if created_directory:
+                    os.rmdir(boot_path)
 
     def install_theme(self, theme_path: Path, theme_file: str):
         dir_the = theme_path

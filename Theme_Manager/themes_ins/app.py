@@ -379,13 +379,13 @@ def load_logo_menu() -> None:
         logo_file = f"{system_path}/{logo.filename}"
         try:
             themes.set_bootlogo(logo_file)
+            cf.set_config("boot.logo", 0)
         except (OSError, subprocess.SubprocessError) as error:
             print(f"[ERROR]Boot logo setting failed: {error}")
             gr.draw_log(
                 translator.translate('Operation failed. See log for details.'), fill=gr.colorBlue, outline=gr.colorBlueD1
             )
         else:
-            cf.set_config("boot.logo", 0)
             gr.draw_log(f"{translator.translate('Boot Logo setting successful!')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
         gr.draw_paint()
         time.sleep(2)
