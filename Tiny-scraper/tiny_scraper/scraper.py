@@ -73,6 +73,9 @@ class Scraper:
             return roms
 
         for file_path in system_path.rglob("*"):
+            # Generated artwork is not a ROM (PICO cartridges also use .png).
+            if any(part.lower() == "imgs" for part in file_path.relative_to(system_path).parts[:-1]):
+                continue
             if file_path.name.startswith(".") or file_path.name.startswith("-"):
                 continue
             if file_path.is_file():

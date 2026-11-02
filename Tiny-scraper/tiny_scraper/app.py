@@ -1,4 +1,6 @@
 import shutil
+import os
+import tempfile
 from pathlib import Path
 from typing import List, Optional
 from main import hw_info, system_lang
@@ -161,11 +163,6 @@ def load_roms_menu() -> None:
 
     rom_folders = set((system_path / rom.filename).parent for rom in roms_list)
 
-    for folder in rom_folders:
-        imgs_folder = folder / "Imgs"
-        if not imgs_folder.exists():
-            imgs_folder.mkdir(parents=True, exist_ok=True)
-
     imgs_files = set()
     for folder in rom_folders:
         imgs_folder = folder / "Imgs"
@@ -195,40 +192,14 @@ def load_roms_menu() -> None:
         gr.draw_log(f"{translator.translate('Scraping...')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
         gr.draw_paint()
         rom = roms_without_image[roms_selected_position]
-        rom_path = system_path / rom.filename
-        imgs_folder = rom_path.parent / "Imgs"
-        if not imgs_folder.exists():
-            imgs_folder.mkdir(parents=True, exist_ok=True)
-
-        if selected_system == "PICO":
-            try:
-                img_path: Path = imgs_folder / f"{rom.name}.png"
-                shutil.copy(rom_path, img_path)
-                gr.draw_log(f"{translator.translate('Scraping completed')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
-                print(f"Done scraping {rom.name}. Saved file to {img_path}")
-            except:
-                gr.draw_log(f"{translator.translate('Scraping failed!')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
-                print(f"Failed to get screenshot for {rom.name}")
-        else:
-            rom.set_crc(scraper.get_crc32_from_file(rom_path))
-            screenshot = scraper.scrape_screenshot(
-                game_name=rom.name, crc=rom.crc, system_id=system_id, system_name=selected_system
-               )
-            if screenshot:
-                img_path: Path = imgs_folder / f"{rom.name}.png"
-                save_screenshot(img_path, screenshot)
-                gr.draw_log(
-                    f"{translator.translate('Scraping completed')}", fill=gr.colorBlue, outline=gr.colorBlueD1
-                )
-                print(f"Done scraping {rom.name}. Saved file to {img_path}")
-            else:
-                gr.draw_log(f"{translator.translate('Scraping failed!')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
-                print(f"Failed to get screenshot for {rom.name}")
+        success, error_message = scrape_rom(rom, system_path, selected_system, system_id)
+        message = 'Scraping completed' if success else error_message
+        gr.draw_log(translator.translate(message), fill=gr.colorBlue, outline=gr.colorBlueD1)
         gr.draw_paint()
         time.sleep(3)
         exit_menu = True
     elif input.key("START"):
-        progress: int = 1
+        progress: int = 0
         success: int = 0
         failure: int = 0
         gr.draw_log(
@@ -239,32 +210,11 @@ def load_roms_menu() -> None:
         gr.draw_paint()
         for rom in roms_without_image:
             if ((system_path / rom.filename).parent, rom.name) not in imgs_files:
-                rom_path = system_path / rom.filename
-                imgs_folder = rom_path.parent / "Imgs"
-                if not imgs_folder.exists():
-                    imgs_folder.mkdir(parents=True, exist_ok=True)
-                if selected_system == "PICO":
-                    try:
-                        img_path: Path = imgs_folder / f"{rom.name}.png"
-                        shutil.copy(rom_path, img_path)
-                        print(f"Done scraping {rom.name}. Saved file to {img_path}")
-                        success += 1
-                    except:
-                        print(f"Failed to get screenshot for {rom.name}")
-                        failure += 1
+                saved, error_message = scrape_rom(rom, system_path, selected_system, system_id)
+                if saved:
+                    success += 1
                 else:
-                    rom.set_crc(scraper.get_crc32_from_file(rom_path))
-                    screenshot: Optional[bytes] = scraper.scrape_screenshot(
-                        game_name=rom.name, crc=rom.crc, system_id=system_id, system_name=selected_system
-                    )
-                    if screenshot:
-                        img_path: Path = imgs_folder / f"{rom.name}.png"
-                        save_screenshot(img_path, screenshot)
-                        print(f"Done scraping {rom.name}. Saved file to {img_path}")
-                        success += 1
-                    else:
-                        print(f"Failed to get screenshot for {rom.name}")
-                        failure += 1
+                    failure += 1
                 progress += 1
                 gr.draw_log(
                     f"{translator.translate('Scraping')} {progress} {translator.translate('of')} {len(roms_without_image)}",
@@ -333,12 +283,45 @@ def load_roms_menu() -> None:
 
     gr.draw_paint()
 
+def scrape_rom(rom, system_path, system_name, system_id):
+    try:
+        rom_path = system_path / rom.filename
+        imgs_folder = rom_path.parent / "Imgs"
+        imgs_folder.mkdir(parents=True, exist_ok=True)
+        img_path = imgs_folder / f"{rom.name}.png"
+        if system_name == "PICO":
+            if rom_path.suffix.lower() != ".png":
+                return False, 'PICO text cartridges do not contain an image.'
+            with Image.open(rom_path) as cartridge:
+                cartridge.load()
+            with tempfile.TemporaryDirectory(dir=imgs_folder) as temporary:
+                temporary_path = Path(temporary) / img_path.name
+                shutil.copy(rom_path, temporary_path)
+                os.replace(temporary_path, img_path)
+        else:
+            rom.set_crc(scraper.get_crc32_from_file(rom_path))
+            screenshot = scraper.scrape_screenshot(
+                game_name=rom.name, crc=rom.crc, system_id=system_id, system_name=system_name)
+            if not screenshot:
+                return False, 'Scraping failed!'
+            save_screenshot(img_path, screenshot)
+        print(f"Done scraping {rom.name}. Saved file to {img_path}")
+        return True, None
+    except (OSError, ValueError, Image.DecompressionBombError) as error:
+        print(f"Failed to scrape {rom.name}: {error}")
+        return False, 'Scraping failed!'
+
+
 def save_screenshot(img_path: Path, screenshot: bytes) -> None:
-    if scraper.resize:
-        print("Resizing image...")
-        img = Image.open(BytesIO(screenshot))
-        target_size = (320, 240)
-        img = img.resize(target_size, Image.LANCZOS)
-        img.save(img_path)
-    else:
-        img_path.write_bytes(screenshot)
+    # Decode before publishing a file that would hide this ROM on the next retry.
+    with Image.open(BytesIO(screenshot)) as img:
+        img.load()
+        with tempfile.TemporaryDirectory(dir=img_path.parent) as temporary:
+            temporary_path = Path(temporary) / img_path.name
+            if scraper.resize:
+                img.resize((320, 240), Image.LANCZOS).save(temporary_path, format="PNG")
+            else:
+                temporary_path.write_bytes(screenshot)
+            if img_path.exists():
+                os.chmod(temporary_path, img_path.stat().st_mode & 0o777)
+            os.replace(temporary_path, img_path)

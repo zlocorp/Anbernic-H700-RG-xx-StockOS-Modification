@@ -2,6 +2,7 @@ from main import hw_info, system_lang
 from graphic import screen_resolutions, UserInterface
 from language import Translator
 import os
+from PIL import Image
 import input
 import sys
 import threading
@@ -25,6 +26,7 @@ slideshow_index = 0
 slideshow_interval = 3
 last_slide_time = 0
 slideshow_images = []
+active_image_path = None
 
 x_size, y_size, max_elem = screen_resolutions.get(hw_info, (640, 480, 11))
 
@@ -109,6 +111,8 @@ def handle_browser_input() -> None:
                 if len(new_file_list) > 0:
                     menu_deep[current_deep] = selected_index
                     current_deep+=1
+                    if current_deep == len(menu_deep):
+                        menu_deep.append(0)
                     current_path = file_list[selected_index][1]
                     update_file_list()
                     selected_index = 0
@@ -162,7 +166,7 @@ def handle_browser_input() -> None:
 
         cur_file = file_list[selected_index][2]
         if cur_file == 'image':
-            gr.preview_image(file_list[selected_index][1], target_x = int(x_size / 2 + 10), target_y = int(y_size / 4), target_width = int(x_size / 2 - 30), target_height = int((x_size / 2 - 30) * ratio))
+            show_image(file_list[selected_index][1], preview=True, target_x = int(x_size / 2 + 10), target_y = int(y_size / 4), target_width = int(x_size / 2 - 30), target_height = int((x_size / 2 - 30) * ratio))
             gr.button_circle((210, button_y), "X", f"{translator.translate('Slideshow')}")
         gr.button_circle((20, button_y), "A", f"{translator.translate('Open')}")
     else:
@@ -177,60 +181,87 @@ def handle_browser_input() -> None:
     gr.draw_paint()
 
 
+def select_image_path(image_path):
+    global selected_index
+    selected_index = next((i for i, entry in enumerate(file_list)
+                           if entry[1] == image_path),
+                          max(0, min(selected_index, len(file_list) - 1)))
+
+
 def handle_image_viewer_input():
-    global current_window, selected_index
-    
-    if input.key("DY"):
-        selected_index = (selected_index + input.value) % len(file_list)
-        enter_fullscreen(file_list[selected_index][1])
-    elif input.key("DX"):
-        selected_index = (selected_index + input.value * 5) % len(file_list)
-        enter_fullscreen(file_list[selected_index][1])
-    elif input.key("L1"):
-        if selected_index > 0:
-            selected_index = max(0, selected_index - max_elem)
-        enter_fullscreen(file_list[selected_index][1])
-    elif input.key("R1"):
-        if selected_index < len(file_list) - 1:
-            selected_index = min(
-                len(file_list) - 1, selected_index + max_elem
-            )
-        enter_fullscreen(file_list[selected_index][1])
-    elif input.key("B"):
+    global file_list
+    if input.key("B"):
         exit_fullscreen()
+        return
+    file_list = an.get_current_path_files(current_path)
+    images = [entry for entry in file_list if entry[2] == "image"]
+    if not images:
+        exit_fullscreen()
+        return
+    index = next((i for i, entry in enumerate(images)
+                  if entry[1] == active_image_path), 0)
+    if input.key("DY"):
+        index = (index + input.value) % len(images)
+    elif input.key("DX"):
+        index = (index + input.value * 5) % len(images)
+    elif input.key("L1"):
+        index = max(0, index - max_elem)
+    elif input.key("R1"):
+        index = min(len(images) - 1, index + max_elem)
+    else:
+        return
+    enter_fullscreen(images[index][1])
 
 
 def handle_slideshow_input():
-    global slideshow_active, slideshow_index, current_window, last_slide_time, selected_index, slideshow_images, slideshow_interval, skip_input_check
+    global slideshow_active, slideshow_index, last_slide_time
     input.reset_input()
     thread = threading.Thread(target=input.check)
     thread.start()
-    
+
     while True:
+        # Check exit before the timer, including when rendering takes a long time.
+        if input.slide_key() or not slideshow_images:
+            slideshow_active = False
+            exit_fullscreen()
+            return
         current_time = time.time()
         if current_time - last_slide_time >= slideshow_interval:
             slideshow_index = (slideshow_index + 1) % len(slideshow_images)
-            last_slide_time = time.time()
+            last_slide_time = current_time
             enter_fullscreen(slideshow_images[slideshow_index][1], is_slideshow=True)
-        elif input.slide_key():
-            slideshow_active = False
-            current_window = "browser"
-            if len(slideshow_images)>1:
-                selected_index = slideshow_index
-            skip_input_check = True
-            return
+
+
+def show_image(image_path, preview=False, **kwargs):
+    try:
+        if preview:
+            gr.preview_image(image_path, **kwargs)
+        else:
+            gr.display_image(image_path)
+        return True
+    except (OSError, ValueError, Image.DecompressionBombError) as error:
+        print(f"Unable to open image {image_path}: {error}")
+        gr.draw_log(translator.translate('Unable to open image.'),
+                    fill=gr.colorBlue, outline=gr.colorBlueD1)
+        return False
+
 
 def enter_fullscreen(image_path, is_slideshow=False):
-    global current_window
+    global current_window, active_image_path
+    active_image_path = image_path
+    select_image_path(image_path)
     if not is_slideshow:
         current_window = "image_viewer"
     gr.draw_clear()
-    gr.display_image(image_path)
+    show_image(image_path)
     gr.draw_paint()
+
 
 def exit_fullscreen():
     global current_window, skip_input_check
     current_window = "browser"
+    update_file_list()
+    select_image_path(active_image_path)
     skip_input_check = True
 
 def update_file_list():
