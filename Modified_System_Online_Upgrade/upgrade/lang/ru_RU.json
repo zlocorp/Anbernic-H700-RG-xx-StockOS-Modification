@@ -127,5 +127,8 @@
     "Update Failed": "Ошибка обновления",
     "Failed to update": "Не удалось обновить",
     "Insufficient TF card space": "Недостаточно места на карте памяти",
-    "Please reserve 1GB of free space on TF1 or TF2": "Освободите не менее 1 ГБ на TF1 или TF2"
+    "Please reserve 1GB of free space on TF1 or TF2": "Освободите не менее 1 ГБ на TF1 или TF2",
+    "Uninstalling old version of": "Удаление старой версии",
+    "Uninstall Failed": "Ошибка удаления",
+    "Failed to uninstall old version of": "Не удалось удалить старую версию"
 }
