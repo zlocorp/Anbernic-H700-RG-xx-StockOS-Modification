@@ -9,7 +9,7 @@ import input
 import sys
 import time
 from anbernic import Anbernic
-from themes import Themes
+from themes import Themes, BootLogoConfigError
 
 ver="v1.2"
 translator = Translator(system_lang)
@@ -258,6 +258,12 @@ def load_theme_menu() -> None:
             gr.draw_paint()
             try:
                 themes.install_theme(system_path, theme_file)
+            except BootLogoConfigError as error:
+                print(f"[ERROR]Theme installation stopped after setting boot logo: {error}")
+                gr.draw_log(
+                    translator.translate('Boot logo was set, but settings could not be saved. Theme installation stopped.'),
+                    fill=gr.colorBlue, outline=gr.colorBlueD1
+                )
             except (OSError, subprocess.SubprocessError) as error:
                 print(f"[ERROR]Theme installation failed: {error}")
                 gr.draw_log(
@@ -379,24 +385,40 @@ def load_logo_menu() -> None:
         logo_file = f"{system_path}/{logo.filename}"
         try:
             themes.set_bootlogo(logo_file)
-            cf.set_config("boot.logo", 0)
         except (OSError, subprocess.SubprocessError) as error:
             print(f"[ERROR]Boot logo setting failed: {error}")
             gr.draw_log(
                 translator.translate('Operation failed. See log for details.'), fill=gr.colorBlue, outline=gr.colorBlueD1
             )
         else:
-            gr.draw_log(f"{translator.translate('Boot Logo setting successful!')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
+            try:
+                cf.set_config("boot.logo", 0)
+            except (OSError, UnicodeError) as error:
+                print(f"[ERROR]Boot logo was set, but settings could not be saved: {error}")
+                gr.draw_log(
+                    translator.translate('Boot logo was set, but random display settings could not be saved.'),
+                    fill=gr.colorBlue, outline=gr.colorBlueD1
+                )
+            else:
+                gr.draw_log(f"{translator.translate('Boot Logo setting successful!')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
         gr.draw_paint()
         time.sleep(2)
 
     elif input.key("X"):
-        cf.switch_config("boot.logo", 2)
-        cur = cf.get_config('boot.logo')
-        if cur == "OFF":
-            gr.draw_log(f"{translator.translate('Random display Boot Logo DISABLED')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
-        elif cur == "ON":
-            gr.draw_log(f"{translator.translate('Random display Boot Logo ENABLED')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
+        try:
+            cf.switch_config("boot.logo", 2)
+            cur = cf.get_config('boot.logo')
+            if cur not in ("OFF", "ON"):
+                raise ValueError("Random boot logo setting is unavailable")
+        except (OSError, UnicodeError, ValueError) as error:
+            print(f"[ERROR]Random boot logo setting failed: {error}")
+            gr.draw_log(translator.translate('Operation failed. See log for details.'),
+                        fill=gr.colorBlue, outline=gr.colorBlueD1)
+        else:
+            if cur == "OFF":
+                gr.draw_log(f"{translator.translate('Random display Boot Logo DISABLED')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
+            elif cur == "ON":
+                gr.draw_log(f"{translator.translate('Random display Boot Logo ENABLED')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
         gr.draw_paint()
         time.sleep(2)
 

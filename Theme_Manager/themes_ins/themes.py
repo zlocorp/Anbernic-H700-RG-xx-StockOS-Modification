@@ -9,6 +9,10 @@ from systems import get_system_extension, systems
 from PIL import Image
 
 
+class BootLogoConfigError(OSError):
+    """The boot image was installed, but its random-display setting was not."""
+
+
 class Files:
     def __init__(self, name, filename, crc=""):
         self.name = name
@@ -146,7 +150,10 @@ class Themes:
                         rotated_img.save(logo_file)
                     shutil.copy2(logo_file, os.path.join(boot_path, new_bootlogo_name))
                     self.set_bootlogo(logo_file)
-                    cf.set_config("boot.logo", 0)
+                    try:
+                        cf.set_config("boot.logo", 0)
+                    except (OSError, UnicodeError) as error:
+                        raise BootLogoConfigError(str(error)) from error
                 elif file_name.lower().endswith('.ttf'):
                     ttf_files.append(os.path.join(root, file_name))
         for font_file in ttf_files:

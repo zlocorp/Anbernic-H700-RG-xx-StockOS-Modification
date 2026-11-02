@@ -1,5 +1,8 @@
 from collections import OrderedDict
 from pathlib import Path
+import os
+import shutil
+import tempfile
 
 config_file = '/mnt/mod/ctrl/configs/system.cfg'
 
@@ -23,9 +26,32 @@ def read_config(filename):
     return config
 
 def write_config(filename, config):
-    with open(filename, 'w', encoding='utf-8') as f:
-        for key, value in config.items():
-            f.write(f"{key}={value}\n")
+    # Follow existing symlinks rather than replacing the link itself. Keep the
+    # temporary file on the target filesystem so replacement is atomic.
+    target = os.path.realpath(filename)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8',
+                                         dir=os.path.dirname(target),
+                                         prefix='.system-', delete=False) as f:
+            temporary = f.name
+            for key, value in config.items():
+                f.write(f"{key}={value}\n")
+            f.flush()
+            if os.path.exists(target):
+                previous = os.stat(target)
+                current = os.fstat(f.fileno())
+                if (current.st_uid, current.st_gid) != (previous.st_uid, previous.st_gid):
+                    os.fchown(f.fileno(), previous.st_uid, previous.st_gid)
+                shutil.copystat(target, temporary)
+            else:
+                os.fchmod(f.fileno(), 0o644)
+            os.fsync(f.fileno())
+        os.replace(temporary, target)
+        temporary = None
+    finally:
+        if temporary is not None:
+            os.unlink(temporary)
 
 def update_config(config, new_entries):
     for key, value in new_entries.items():
@@ -56,15 +82,14 @@ def del_config(keys):
     write_config(config_file, config)
 
 def get_config(keys):
-    config = read_config(config_file)
-    values = get_value(config, keys)
-    print(f"values: {values}")
-    if values == "0":
-        return "OFF"
-    elif values == "1":
-        return "ON"
-    elif values == "2":
-        return "AUTO"
+    try:
+        config = read_config(config_file)
+        values = get_value(config, keys)
+    except (OSError, UnicodeError) as error:
+        print(f"[ERROR]Cannot read setting {keys}: {error}")
+        return "UNKNOWN"
+    return {"0": "OFF", "1": "ON", "2": "AUTO"}.get(values, "UNKNOWN")
+
 
 def switch_config(keys, max):
     config = read_config(config_file)

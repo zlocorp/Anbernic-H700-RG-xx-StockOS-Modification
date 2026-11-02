@@ -48,5 +48,8 @@
     "help_logo": "Tip: Please select your favorite boot logo image and set it.",
     "message_02-1": "1. Theme files should be placed in 'anbernic/themes' on SD1 or SD2.\nTheme files must be .zip archives, with corresponding .png preview images\nmatching the same filename and directory structure.\n",
     "message_02-2": "2. Boot logo images should be placed in 'anbernic/bootlogo'\non SD1 or SD2. Files must be .bmp images with the same resolution as the device.\nThe boot image for the RG28xx must be rotated beforehand.\n",
-    "message_02-3": "3. 'Backup Theme' and 'Restore Backup' only affect currently installed\nsystem themes. They do not apply to uninstalled theme files.\n'Random Display' enables random boot logo selection on startup. This feature\nautomatically disables when a theme with boot logo is installed."
+    "message_02-3": "3. 'Backup Theme' and 'Restore Backup' only affect currently installed\nsystem themes. They do not apply to uninstalled theme files.\n'Random Display' enables random boot logo selection on startup. This feature\nautomatically disables when a theme with boot logo is installed.",
+    "UNKNOWN": "Unknown",
+    "Boot logo was set, but random display settings could not be saved.": "Boot logo was set, but random display settings could not be saved.",
+    "Boot logo was set, but settings could not be saved. Theme installation stopped.": "Boot logo was set, but settings could not be saved. Theme installation stopped."
 }
