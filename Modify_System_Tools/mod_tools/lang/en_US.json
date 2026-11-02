@@ -1,4 +1,6 @@
 {
+    "default.menu": "Settings unavailable",
+    "default.help": "Unable to load menu configuration.",
     "Back": "Back",
     "Modify System Tools": "Modify System Tools",
     "Backup file for restored Emulator settings:": "Backup file for restored Emulator settings:",

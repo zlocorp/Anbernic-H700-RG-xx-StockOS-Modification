@@ -1,4 +1,6 @@
 {
+    "default.menu": "Settings unavailable",
+    "default.help": "Unable to load menu configuration.",
     "Reset": "Reset",
     "Quit": "Quit",
     "Fast-Forward": "Fast-Forward",
