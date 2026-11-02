@@ -78,15 +78,22 @@ class Themes:
     def set_bootlogo(logo_file: str):
         boot_device = '/dev/mmcblk0p2'
         boot_path = '/mnt/boot'
+        if os.path.ismount(boot_path):
+            raise OSError(f"Boot mount point is already in use: {boot_path}")
+        created_directory = not os.path.exists(boot_path)
         os.makedirs(boot_path, exist_ok=True)
-        mount_command = f"mount -t vfat -o rw,utf8,noatime {boot_device} {boot_path}"
-        subprocess.run(mount_command, shell=True, check=True)
-        copy_command = f"cp -f {logo_file} {boot_path}/bootlogo.bmp"
-        subprocess.run(copy_command, shell=True, check=True)
-        umount_command = f"umount {boot_path}"
-        subprocess.run(umount_command, shell=True, check=True)
-        if os.path.exists(boot_path):
-            os.rmdir(boot_path)
+        subprocess.run(
+            ['mount', '-t', 'vfat', '-o', 'rw,utf8,noatime', boot_device, boot_path],
+            check=True,
+        )
+        try:
+            shutil.copyfile(logo_file, os.path.join(boot_path, 'bootlogo.bmp'))
+        finally:
+            # Only unmount after our mount succeeded. Leave the directory in
+            # place if unmount fails; it may still contain a mounted filesystem.
+            subprocess.run(['umount', boot_path], check=True)
+            if created_directory:
+                os.rmdir(boot_path)
 
     def install_theme(self, theme_path: Path, theme_file: str):
         dir_the = theme_path

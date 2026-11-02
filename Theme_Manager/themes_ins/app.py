@@ -256,10 +256,17 @@ def load_theme_menu() -> None:
         if os.path.exists(theme_file):
             gr.draw_log(f"{translator.translate('Installing...')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
             gr.draw_paint()
-            themes.install_theme(system_path, theme_file)
-            gr.draw_log(
-                f"{translator.translate('Theme installation successful!')}", fill=gr.colorBlue, outline=gr.colorBlueD1
-            )
+            try:
+                themes.install_theme(system_path, theme_file)
+            except (OSError, subprocess.SubprocessError) as error:
+                print(f"[ERROR]Theme installation failed: {error}")
+                gr.draw_log(
+                    translator.translate('Operation failed. See log for details.'), fill=gr.colorBlue, outline=gr.colorBlueD1
+                )
+            else:
+                gr.draw_log(
+                    f"{translator.translate('Theme installation successful!')}", fill=gr.colorBlue, outline=gr.colorBlueD1
+                )
             gr.draw_paint()
             time.sleep(2)
 
@@ -370,9 +377,16 @@ def load_logo_menu() -> None:
         gr.draw_paint()
         logo = logo_list[logo_selected_position]
         logo_file = f"{system_path}/{logo.filename}"
-        themes.set_bootlogo(logo_file)
-        cf.set_config("boot.logo", 0)
-        gr.draw_log(f"{translator.translate('Boot Logo setting successful!')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
+        try:
+            themes.set_bootlogo(logo_file)
+        except (OSError, subprocess.SubprocessError) as error:
+            print(f"[ERROR]Boot logo setting failed: {error}")
+            gr.draw_log(
+                translator.translate('Operation failed. See log for details.'), fill=gr.colorBlue, outline=gr.colorBlueD1
+            )
+        else:
+            cf.set_config("boot.logo", 0)
+            gr.draw_log(f"{translator.translate('Boot Logo setting successful!')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
         gr.draw_paint()
         time.sleep(2)
 
