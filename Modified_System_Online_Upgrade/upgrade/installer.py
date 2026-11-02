@@ -9,6 +9,7 @@ from __future__ import annotations
 # =========================
 import ctypes
 import glob
+import hashlib
 import json
 import logging
 import math
@@ -1226,7 +1227,7 @@ class SoftwareManager:
             return False
 
     def _download_software(self, software: SoftwarePackage, download_path: str) -> bool:
-        """Download software package with progress"""
+        """Download and verify the catalog size and MD5 before installation."""
 
         def progress_hook(block_num: int, block_size: int, total_size: int):
             try:
@@ -1258,7 +1259,20 @@ class SoftwareManager:
             except Exception as e:
                 LOGGER.error(f"Error updating progress: {e}")
 
+        response = None
         try:
+            # Catalog sizes are bytes. Refuse incomplete metadata rather than
+            # extracting an unverified package (including from custom catalogs).
+            expected_size = software.size
+            expected_md5 = software.md5
+            if type(expected_size) is not int or expected_size <= 0:
+                raise ValueError("Invalid package size in catalog")
+            if (not isinstance(expected_md5, str) or len(expected_md5) != 32
+                    or any(char not in "0123456789abcdefABCDEF" for char in expected_md5)):
+                raise ValueError("Invalid package MD5 in catalog")
+            expected_md5 = expected_md5.lower()
+            digest = hashlib.md5()
+
             LOGGER.info(f"Downloading {self.cfg.server_url + software.download_url}")
             response = self.session.get(self.cfg.server_url + software.download_url, stream=True, timeout=(60, 300))
             response.raise_for_status()
@@ -1270,17 +1284,34 @@ class SoftwareManager:
             with open(download_path, 'wb') as f:
                 for data in response.iter_content(block_size):
                     downloaded += len(data)
+                    if downloaded > expected_size:
+                        raise ValueError("Downloaded package exceeds catalog size")
+                    digest.update(data)
                     f.write(data)
                     f.flush()
 
                     # Update progress
                     progress_hook(downloaded // block_size, block_size, total_size)
 
+            if downloaded != expected_size:
+                raise ValueError("Downloaded package size does not match catalog")
+            if digest.hexdigest() != expected_md5:
+                raise ValueError("Downloaded package MD5 does not match catalog")
             return True
 
         except Exception as e:
             LOGGER.error(f"Error downloading {software.name}: {e}")
+            # Never leave a failed download available for extraction or reuse.
+            try:
+                os.remove(download_path)
+            except FileNotFoundError:
+                pass
+            except OSError as cleanup_error:
+                LOGGER.warning(f"Unable to remove failed download: {cleanup_error}")
             return False
+        finally:
+            if response is not None:
+                response.close()
 
     def _extract_software(self, zip_path: str, extract_path: str, software: SoftwarePackage) -> bool:
         """Extract software package with progress"""
