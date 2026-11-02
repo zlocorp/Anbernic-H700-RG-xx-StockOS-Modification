@@ -88,6 +88,8 @@ def get_config(keys):
     except (OSError, UnicodeError) as error:
         print(f"[ERROR]Cannot read setting {keys}: {error}")
         return "UNKNOWN"
+    if keys == "boot.logo" and values not in ("0", "1"):
+        return "UNKNOWN"
     return {"0": "OFF", "1": "ON", "2": "AUTO"}.get(values, "UNKNOWN")
 
 
