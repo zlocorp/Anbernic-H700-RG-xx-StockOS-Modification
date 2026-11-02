@@ -1,4 +1,5 @@
 from pathlib import Path
+from PIL import Image
 from main import hw_info, system_lang
 from graphic import screen_resolutions, UserInterface
 from language import Translator
@@ -29,7 +30,7 @@ button_y = y_size - 30
 ratio = y_size / x_size
 
 
-def get_overlay_image(bezel_file, system_path):
+def get_overlay_image(bezel_file, system_path, check_image=False):
     """Return an existing overlay image, or None for an unusable config."""
     try:
         with open(bezel_file, 'r') as file_object:
@@ -45,10 +46,31 @@ def get_overlay_image(bezel_file, system_path):
                 if not value:
                     return None
                 image_path = Path(system_path) / value
-                return str(image_path) if image_path.is_file() else None
-    except (OSError, UnicodeError, ValueError):
+                if not image_path.is_file():
+                    return None
+                if check_image:
+                    with Image.open(image_path) as image:
+                        image.load()
+                return str(image_path)
+    except (OSError, UnicodeError, ValueError, Image.DecompressionBombError):
         return None
     return None
+
+
+def get_current_overlay_name(cfg_file):
+    try:
+        with open(cfg_file, 'r') as file_object:
+            value = file_object.readline().strip()
+        if len(value) >= 2 and value[0] in ("'", '"') and value[-1] == value[0]:
+            value = value[1:-1]
+        path = Path(value)
+        if path.suffix.lower() == '.cfg' and path.stem:
+            return path.stem
+    except FileNotFoundError:
+        return translator.translate('default')
+    except (OSError, UnicodeError, ValueError):
+        pass
+    return translator.translate('Unknown')
 
 
 def start():
@@ -215,7 +237,7 @@ def load_cfg_menu() -> None:
         if cfg_is_ok == 1:
             rom = roms_list[roms_selected_position]
             bezel_file = f"{system_path}/{rom.filename}"
-            img_file = get_overlay_image(bezel_file, system_path)
+            img_file = get_overlay_image(bezel_file, system_path, check_image=True)
             if img_file is not None:
                 cfg_file = f"{cfg_path}/{selected_system}.cfg"
                 gr.draw_log(f"{translator.translate('Setting...')}", fill=gr.colorBlue, outline=gr.colorBlueD1)
@@ -263,15 +285,7 @@ def load_cfg_menu() -> None:
         skip_input_check = True
         return
 
-    if os.path.exists(cfg_file):
-        with open(cfg_file, 'r') as file_object:
-            for line in file_object:
-                line = line.strip()
-                overlay_name = line.split('/')[6]
-                overlay_name = overlay_name.split('.cfg')[0]
-                break
-    else:
-        overlay_name = translator.translate('default')
+    overlay_name = get_current_overlay_name(cfg_file)
     gr.draw_clear()
 
     gr.draw_rectangle_r([10, 40, x_size - 10, y_size - 40], 15, fill=gr.colorGray, outline=None)
@@ -295,11 +309,15 @@ def load_cfg_menu() -> None:
     rom = roms_list[roms_selected_position]
     bezel_file = f"{system_path}/{rom.filename}"
     img_file = get_overlay_image(bezel_file, system_path)
+    cfg_is_ok = 2
     if img_file is not None:
-        cfg_is_ok = 1
-        gr.display_image(img_file, target_x = int(x_size / 2 + 10), target_y = int(y_size / 4), target_width = int(x_size / 2 - 30), target_height = int((x_size / 2 - 30) * ratio))
-    else:
-        cfg_is_ok = 2
+        try:
+            gr.display_image(img_file, target_x = int(x_size / 2 + 10), target_y = int(y_size / 4), target_width = int(x_size / 2 - 30), target_height = int((x_size / 2 - 30) * ratio))
+        except (OSError, ValueError, Image.DecompressionBombError) as error:
+            print(f"[ERROR]Cannot preview bezel image {img_file}: {error}")
+        else:
+            cfg_is_ok = 1
+    if cfg_is_ok == 2:
         gr.draw_log(
             f"{translator.translate('The .cfg file has an issue and cannot be used!')}", fill=gr.colorBlue, outline=gr.colorBlueD1
         )
