@@ -82,5 +82,6 @@
     "Already a gamma kernel!": "Ядро Gamma уже используется!",
     "Already a stock kernel!": "Штатное ядро уже используется!",
     "Gamma kernel file not found!": "Файл ядра Gamma не найден!",
-    "Rebooting...": "Перезагрузка..."
+    "Rebooting...": "Перезагрузка...",
+    "No available settings found.": "Доступные настройки не найдены."
 }
