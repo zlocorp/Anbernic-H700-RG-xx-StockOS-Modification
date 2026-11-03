@@ -301,13 +301,13 @@ class Config:
 class SoftwarePackage:
     id: str
     name: str
-    name_zh: str
     version: str
     category: str
     size: int
     md5: str
     download_url: str
     description: str
+    name_zh: str = ""
     description_zh: str = ""
     description_en: str = ""
     instruction: str = ""
@@ -977,33 +977,66 @@ class SoftwareManager:
         self.load_installed_software()
 
     def load_installed_software(self) -> None:
-        """Load installed software from database"""
+        """Load legacy records independently and retain data we cannot interpret."""
+        self.installed_software = {}
+        self._unparsed_installed_software = {}
+        self._original_installed_records = {}
+        self._database_read_failed = False
         try:
-            if os.path.exists(self.cfg.database_path):
-                with open(self.cfg.database_path, 'r', encoding='utf-8') as f:
-                    installed_data = json.load(f)
-                    for software_id, data in installed_data.items():
-                        self.installed_software[software_id] = SoftwarePackage(**data)
-                LOGGER.info(f"Loaded {len(self.installed_software)} installed software entries")
+            with open(self.cfg.database_path, "r", encoding="utf-8") as f:
+                installed_data = json.load(f)
+            if not isinstance(installed_data, dict):
+                raise ValueError("Installed software database must be an object")
+        except FileNotFoundError:
+            return
         except Exception as e:
             LOGGER.error(f"Error loading installed software database: {e}")
-            self.installed_software = {}
+            self._database_read_failed = True
+            return
+
+        known_fields = {item.name for item in fields(SoftwarePackage)}
+        for software_id, data in installed_data.items():
+            try:
+                if not isinstance(data, dict) or data.get("id") != software_id:
+                    raise ValueError("Invalid installed software record or mismatched ID")
+                software = SoftwarePackage(**{k: v for k, v in data.items() if k in known_fields})
+                self.installed_software[software_id] = software
+                self._original_installed_records[software_id] = data
+            except Exception as e:
+                self._unparsed_installed_software[software_id] = data
+                LOGGER.warning(f"Preserving unreadable installed software record {software_id}: {e}")
+        LOGGER.info(f"Loaded {len(self.installed_software)} installed software entries")
 
     def save_installed_software(self) -> bool:
         """Atomically replace the database without truncating the previous record."""
+        if getattr(self, "_database_read_failed", False):
+            LOGGER.error("Refusing to overwrite unreadable installed software database")
+            return False
         temporary_path = None
         try:
+            installed_data = dict(getattr(self, "_unparsed_installed_software", {}))
+            original_records = getattr(self, "_original_installed_records", {})
+            for software_id, software in self.installed_software.items():
+                record = dict(original_records.get(software_id, {}))
+                record.update(asdict(software))
+                installed_data[software_id] = record
             database_dir = os.path.dirname(self.cfg.database_path) or "."
             os.makedirs(database_dir, exist_ok=True)
             with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
                                              dir=database_dir, prefix=".installed-",
                                              delete=False) as f:
                 temporary_path = f.name
-                json.dump({k: asdict(v) for k, v in self.installed_software.items()}, f, indent=2)
+                json.dump(installed_data, f, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(temporary_path, self.cfg.database_path)
             temporary_path = None
+            self._unparsed_installed_software = {
+                k: v for k, v in installed_data.items() if k not in self.installed_software
+            }
+            self._original_installed_records = {
+                k: installed_data[k] for k in self.installed_software
+            }
             LOGGER.info("Saved installed software database")
             return True
         except Exception as e:
@@ -1102,6 +1135,9 @@ class SoftwareManager:
     def prepare_software(self, software: SoftwarePackage) -> Optional[Tuple[str, str]]:
         """Stage and validate the package before changing an installed version."""
         self.last_error = ""
+        if getattr(self, "_database_read_failed", False):
+            self.last_error = "Installation information could not be read. No changes were made."
+            return None
         stage_root = None
         try:
             os.makedirs(self.cfg.cache_path, exist_ok=True)
@@ -1134,6 +1170,9 @@ class SoftwareManager:
     def retry_pending_operation(self, software: SoftwarePackage) -> bool:
         """Retry installation information only; never repeat a successful script."""
         self.last_error = ""
+        if getattr(self, "_database_read_failed", False):
+            self.last_error = "Installation information could not be read. No changes were made."
+            return False
         pending = getattr(self, "pending_operations", {}).get(software.id)
         if pending is None:
             return False
@@ -1195,6 +1234,9 @@ class SoftwareManager:
                          prepared: Optional[Tuple[str, str]] = None) -> bool:
         """Install a validated package, optionally reusing update preflight staging."""
         self.last_error = ""
+        if getattr(self, "_database_read_failed", False):
+            self.last_error = "Installation information could not be read. No changes were made."
+            return False
         if software.id in getattr(self, "pending_operations", {}):
             if self.pending_operations[software.id]["action"] != "install":
                 self.last_error = "Installation information is pending. Press A to retry."
@@ -1267,6 +1309,9 @@ class SoftwareManager:
     def uninstall_software(self, software: SoftwarePackage) -> bool:
         """Uninstall software package, return True on success, False on failure."""
         self.last_error = ""
+        if getattr(self, "_database_read_failed", False):
+            self.last_error = "Installation information could not be read. No changes were made."
+            return False
         if software.id in getattr(self, "pending_operations", {}):
             if self.pending_operations[software.id]["action"] != "uninstall":
                 self.last_error = "Installation information is pending. Press A to retry."
@@ -2518,7 +2563,7 @@ class SoftwareCenterApp:
         if prepared is None:
             self.ui_helper.draw_message(
                 self.t.t("Update Failed"),
-                f"{self.t.t('Failed to update')} {software.name}",
+                self.t.t(self.manager.last_error) if getattr(self.manager, "last_error", "") else f"{self.t.t('Failed to update')} {software.name}",
                 "error"
             )
             self.wait_for_input()
