@@ -1018,7 +1018,12 @@ class SoftwareManager:
             original_records = getattr(self, "_original_installed_records", {})
             for software_id, software in self.installed_software.items():
                 record = dict(original_records.get(software_id, {}))
-                record.update(asdict(software))
+                current = asdict(software)
+                previous_extra = record.get("extra_fields")
+                current_extra = current.get("extra_fields")
+                if isinstance(previous_extra, dict) and isinstance(current_extra, dict):
+                    current["extra_fields"] = {**previous_extra, **current_extra}
+                record.update(current)
                 installed_data[software_id] = record
             database_dir = os.path.dirname(self.cfg.database_path) or "."
             os.makedirs(database_dir, exist_ok=True)
