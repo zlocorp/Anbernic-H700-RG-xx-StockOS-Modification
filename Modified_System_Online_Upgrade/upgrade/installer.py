@@ -7,6 +7,7 @@ from __future__ import annotations
 # =========================
 # Standard Library Imports
 # =========================
+import base64
 import ctypes
 import glob
 import hashlib
@@ -975,6 +976,115 @@ class SoftwareManager:
 
         # Load installed software database
         self.load_installed_software()
+        self.load_pending_operations()
+
+    @staticmethod
+    def _sync_directory(directory: str) -> None:
+        # Persist directory entries as well as file contents before advancing phases.
+        fd = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    def _journal_path(self) -> str:
+        return os.path.join(os.path.dirname(self.cfg.database_path) or ".",
+                            "pending-operations.json")
+
+    def _write_pending_operations(self, operations: dict) -> None:
+        """Commit journal first; never advance in-memory state if persistence fails."""
+        path = self._journal_path()
+        directory = os.path.dirname(path)
+        os.makedirs(directory, exist_ok=True)
+        records = {}
+        for software_id, pending in operations.items():
+            records[software_id] = {
+                "action": pending["action"], "phase": pending["phase"],
+                "software": asdict(pending["software"]),
+                "uninstall_script": pending.get("uninstall_script"),
+            }
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=directory,
+                                             prefix=".pending-", delete=False) as f:
+                temporary_path = f.name
+                json.dump({"version": 1, "operations": records}, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary_path, path)
+            temporary_path = None
+            self._sync_directory(directory)
+        finally:
+            if temporary_path is not None:
+                os.remove(temporary_path)
+        self.pending_operations = operations
+
+    def load_pending_operations(self) -> None:
+        """An ambiguous or unreadable journal requires manual reconciliation."""
+        self.pending_operations = {}
+        self._journal_read_failed = False
+        try:
+            with open(self._journal_path(), "r", encoding="utf-8") as f:
+                document = json.load(f)
+            if not isinstance(document, dict) or document.get("version") != 1:
+                raise ValueError("Unsupported operation journal")
+            records = document.get("operations")
+            if not isinstance(records, dict) or len(records) > 1:
+                raise ValueError("Invalid operation journal")
+            restored = {}
+            for software_id, pending in records.items():
+                if not isinstance(pending, dict):
+                    raise ValueError("Invalid pending operation")
+                if pending.get("action") not in ("install", "uninstall"):
+                    raise ValueError("Invalid operation action")
+                if pending.get("phase") not in ("running", "completed"):
+                    raise ValueError("Invalid operation phase")
+                software = SoftwarePackage(**pending["software"])
+                if software.id != software_id:
+                    raise ValueError("Mismatched operation ID")
+                for component in (software.id, software.category):
+                    if (not isinstance(component, str) or component in ("", ".", "..")
+                            or "/" in component or "\\" in component):
+                        raise ValueError("Invalid package path component")
+                script = pending.get("uninstall_script")
+                if script is not None:
+                    base64.b64decode(script, validate=True)
+                restored[software_id] = dict(pending, software=software)
+            self.pending_operations = restored
+        except FileNotFoundError:
+            return
+        except Exception as e:
+            LOGGER.error(f"Could not load pending operation journal: {e}")
+            self._journal_read_failed = True
+
+    def _operation_blocked(self, software: SoftwarePackage) -> bool:
+        if getattr(self, "_journal_read_failed", False):
+            self.last_error = "Operation journal could not be read. Manual recovery is required."
+            return True
+        pending = getattr(self, "pending_operations", {})
+        if pending and software.id not in pending:
+            self.last_error = "Another operation is pending. Resolve it before making changes."
+            return True
+        return False
+
+    def _begin_operation(self, action: str, software: SoftwarePackage,
+                         prepared: Optional[Tuple[str, str]] = None) -> None:
+        self._write_pending_operations({software.id: {
+            "action": action, "phase": "running",
+            "software": SoftwarePackage(**asdict(software)),
+            "prepared": prepared, "uninstall_script": None,
+        }})
+
+    def _complete_operation(self, software: SoftwarePackage) -> None:
+        pending = dict(self.pending_operations[software.id], phase="completed",
+                       software=SoftwarePackage(**asdict(software)))
+        if pending["action"] == "install":
+            # Installers may create or rewrite uninstall.sh while they run.
+            source = os.path.join(pending["prepared"][1], "uninstall.sh")
+            if os.path.isfile(source):
+                with open(source, "rb") as f:
+                    pending["uninstall_script"] = base64.b64encode(f.read()).decode("ascii")
+        self._write_pending_operations({software.id: pending})
 
     def load_installed_software(self) -> None:
         """Load legacy records independently and retain data we cannot interpret."""
@@ -1036,6 +1146,7 @@ class SoftwareManager:
                 os.fsync(f.fileno())
             os.replace(temporary_path, self.cfg.database_path)
             temporary_path = None
+            self._sync_directory(database_dir)
             self._unparsed_installed_software = {
                 k: v for k, v in installed_data.items() if k not in self.installed_software
             }
@@ -1053,6 +1164,13 @@ class SoftwareManager:
                     os.remove(temporary_path)
                 except OSError as e:
                     LOGGER.warning(f"Could not remove temporary database: {e}")
+
+    def _include_pending_software(self) -> None:
+        # Recovery must remain reachable even if a package disappears from the catalog.
+        present = {software.id for software in self.software_list}
+        for software_id, pending in getattr(self, "pending_operations", {}).items():
+            if software_id not in present:
+                self.software_list.append(SoftwarePackage(**asdict(pending["software"])))
 
     def fetch_software_list(self) -> bool:
         """Fetch software list from repositories"""
@@ -1112,6 +1230,7 @@ class SoftwareManager:
                         LOGGER.error(f"Error processing software item {i}: {e}")
                         continue
 
+                self._include_pending_software()
                 LOGGER.info(f"Successfully loaded {len(self.software_list)} software packages from {repo['name']}")
                 return True
 
@@ -1120,6 +1239,10 @@ class SoftwareManager:
                 continue
 
         LOGGER.error("Failed to fetch software list from all repositories")
+        if getattr(self, "pending_operations", {}):
+            self.software_list = []
+            self._include_pending_software()
+            return True
         return False
 
     def get_software_by_category(self, category: str) -> List[SoftwarePackage]:
@@ -1178,33 +1301,42 @@ class SoftwareManager:
         if getattr(self, "_database_read_failed", False):
             self.last_error = "Installation information could not be read. No changes were made."
             return False
+        if self._operation_blocked(software):
+            return False
         pending = getattr(self, "pending_operations", {}).get(software.id)
         if pending is None:
             return False
+        if pending["phase"] != "completed":
+            self.last_error = "Previous script outcome is unknown. Manual recovery is required."
+            return False
         completed = pending["software"]
         installed = pending["action"] == "install"
+        if installed:
+            self.installed_software[completed.id] = completed
+        else:
+            self.installed_software.pop(completed.id, None)
         # A repository refresh may have replaced the selected package object.
         software.installed = installed
         software.local_version = completed.local_version
-        software.update_available = False
+        software.update_available = installed and software.version != completed.local_version
         try:
             uninstall_dir = os.path.join(self.cfg.uninstall_path, completed.category, completed.id)
             uninstall_script = os.path.join(uninstall_dir, "uninstall.sh")
             if installed:
-                source = os.path.join(pending["prepared"][1], "uninstall.sh")
-                if os.path.isfile(source):
+                script = pending.get("uninstall_script")
+                if script is not None:
                     os.makedirs(uninstall_dir, exist_ok=True)
                     temporary_path = None
                     try:
-                        with open(source, "rb") as source_file:
-                            with tempfile.NamedTemporaryFile(mode="wb", dir=uninstall_dir,
-                                                             prefix=".uninstall-", delete=False) as target:
-                                temporary_path = target.name
-                                shutil.copyfileobj(source_file, target)
-                                target.flush()
-                                os.fsync(target.fileno())
+                        with tempfile.NamedTemporaryFile(mode="wb", dir=uninstall_dir,
+                                                         prefix=".uninstall-", delete=False) as target:
+                            temporary_path = target.name
+                            target.write(base64.b64decode(script, validate=True))
+                            target.flush()
+                            os.fsync(target.fileno())
                         os.replace(temporary_path, uninstall_script)
                         temporary_path = None
+                        self._sync_directory(uninstall_dir)
                     finally:
                         if temporary_path is not None:
                             try:
@@ -1218,6 +1350,7 @@ class SoftwareManager:
                     shutil.rmtree(completed.install_path)
             if not self.save_installed_software():
                 raise OSError("Could not save installed software database")
+            self._write_pending_operations({})
         except Exception as e:
             LOGGER.error(f"Could not finalize installation information for {completed.name}: {e}")
             self.last_error = (
@@ -1226,7 +1359,6 @@ class SoftwareManager:
                 "Files removed, but installation information could not be saved. Press A to retry."
             )
             return False
-        del self.pending_operations[software.id]
         self._cleanup_prepared(pending.get("prepared"))
         if installed and completed.instruction:
             try:
@@ -1241,6 +1373,8 @@ class SoftwareManager:
         self.last_error = ""
         if getattr(self, "_database_read_failed", False):
             self.last_error = "Installation information could not be read. No changes were made."
+            return False
+        if self._operation_blocked(software):
             return False
         if software.id in getattr(self, "pending_operations", {}):
             if self.pending_operations[software.id]["action"] != "install":
@@ -1263,6 +1397,7 @@ class SoftwareManager:
                 LOGGER.error(f"Package for {software.name} is missing install.sh")
                 return False
 
+            self._begin_operation("install", software, prepared)
             if has_install:
                 LOGGER.info(f"Executing install.sh for {software.name}")
                 self.ui.tips_info(self.t.t("Installing") + ' ...')
@@ -1292,11 +1427,7 @@ class SoftwareManager:
             software.install_path = install_dir
             software.update_available = False
             self.installed_software[software.id] = software
-            if not hasattr(self, "pending_operations"):
-                self.pending_operations = {}
-            self.pending_operations[software.id] = {
-                "action": "install", "software": software, "prepared": prepared
-            }
+            self._complete_operation(software)
             if not self.retry_pending_operation(software):
                 return False
 
@@ -1317,6 +1448,8 @@ class SoftwareManager:
         if getattr(self, "_database_read_failed", False):
             self.last_error = "Installation information could not be read. No changes were made."
             return False
+        if self._operation_blocked(software):
+            return False
         if software.id in getattr(self, "pending_operations", {}):
             if self.pending_operations[software.id]["action"] != "uninstall":
                 self.last_error = "Installation information is pending. Press A to retry."
@@ -1332,6 +1465,7 @@ class SoftwareManager:
             if not os.path.isfile(uninstall_script):
                 self.last_error = "Uninstall script is missing. Installed files and record were kept."
                 return False
+            self._begin_operation("uninstall", software)
             script_success = True
 
             if os.path.exists(uninstall_script):
@@ -1371,11 +1505,7 @@ class SoftwareManager:
                     s.update_available = False
                     break
 
-            if not hasattr(self, "pending_operations"):
-                self.pending_operations = {}
-            self.pending_operations[software.id] = {
-                "action": "uninstall", "software": software
-            }
+            self._complete_operation(software)
             if not self.retry_pending_operation(software):
                 return False
 
